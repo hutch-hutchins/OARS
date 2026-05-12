@@ -30,8 +30,8 @@ enum SimState {
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
-enum BottomTab {
-    Console,
+enum MainTab {
+    Editor,
     TextSegment,
 }
 
@@ -59,7 +59,7 @@ pub struct OarsApp {
 
     steps_per_frame: u32,
 
-    bottom_tab: BottomTab,
+    main_tab: MainTab,
     register_tab: RegisterTab,
 
     // Register snapshots for change highlighting
@@ -101,7 +101,7 @@ impl OarsApp {
             input_buf: String::new(),
             input_queue: VecDeque::new(),
             steps_per_frame: 50_000,
-            bottom_tab: BottomTab::Console,
+            main_tab: MainTab::Editor,
             register_tab: RegisterTab::Integer,
             prev_int_regs: [0u32; 32],
             prev_fp_regs: [0u64; 32],
@@ -181,16 +181,15 @@ impl OarsApp {
                 self.cpu = Some(cpu);
                 self.asm_out = Some(out);
                 self.sim_state = SimState::Ready;
-                self.bottom_tab = BottomTab::TextSegment;
+                self.main_tab = MainTab::TextSegment;
                 true
             }
         }
     }
 
-    fn do_assemble_and_run(&mut self) {
-        if self.do_assemble() {
+    fn do_run(&mut self) {
+        if self.cpu.is_some() {
             self.sim_state = SimState::Running;
-            self.bottom_tab = BottomTab::Console;
         }
     }
 
@@ -312,8 +311,13 @@ impl OarsApp {
             if ui.button("Assemble").clicked() {
                 self.do_assemble();
             }
-            if ui.button("Assemble & Run").clicked() {
-                self.do_assemble_and_run();
+            let can_run = self.cpu.is_some()
+                && !matches!(self.sim_state, SimState::Running | SimState::WaitingInput);
+            if ui
+                .add_enabled(can_run, egui::Button::new("Run"))
+                .clicked()
+            {
+                self.do_run();
             }
 
             ui.separator();
@@ -909,24 +913,14 @@ impl eframe::App for OarsApp {
             self.show_toolbar(ui);
         });
 
-        // Bottom tabs: Console | Text Segment
+        // Bottom panel: Console only
         egui::TopBottomPanel::bottom("bottom_panel")
             .resizable(true)
             .default_height(200.0)
             .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.selectable_value(&mut self.bottom_tab, BottomTab::Console, "Console");
-                    ui.selectable_value(
-                        &mut self.bottom_tab,
-                        BottomTab::TextSegment,
-                        "Text Segment",
-                    );
-                });
+                ui.strong("Console");
                 ui.separator();
-                match self.bottom_tab {
-                    BottomTab::Console => self.show_console(ui),
-                    BottomTab::TextSegment => self.show_text_segment(ui),
-                }
+                self.show_console(ui);
             });
 
         // Right panel: register tabs
@@ -937,9 +931,21 @@ impl eframe::App for OarsApp {
                 self.show_registers(ui);
             });
 
-        // Centre: editor
+        // Centre: Editor | Text Segment tabs
         egui::CentralPanel::default().show(ctx, |ui| {
-            self.show_editor(ui);
+            ui.horizontal(|ui| {
+                ui.selectable_value(&mut self.main_tab, MainTab::Editor, "Editor");
+                ui.selectable_value(
+                    &mut self.main_tab,
+                    MainTab::TextSegment,
+                    "Text Segment",
+                );
+            });
+            ui.separator();
+            match self.main_tab {
+                MainTab::Editor => self.show_editor(ui),
+                MainTab::TextSegment => self.show_text_segment(ui),
+            }
         });
     }
 }
