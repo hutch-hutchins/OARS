@@ -495,8 +495,8 @@ mod tests {
 
     #[test]
     fn float_literal() {
-        let toks = tokens("3.14");
-        assert!(matches!(toks[0], Token::Float(f) if (f - 3.14).abs() < 1e-10));
+        let toks = tokens("2.5");
+        assert!(matches!(toks[0], Token::Float(f) if (f - 2.5).abs() < 1e-10));
     }
 
     // ── String literals ──────────────────────────────────────────────────────
