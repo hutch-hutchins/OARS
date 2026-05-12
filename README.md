@@ -1,11 +1,12 @@
 # OARS — Oxide Assembler and Runtime Simulator
 
-A single-binary RISC-V assembler and simulator for ECE 2063.  
-No Java. No installer. Download and run.
+> OARS is what RARS would be if it were rewritten today — a single double-clickable binary for Windows, macOS, and Linux. No Java, no installer.
+
+OARS follows the MARS → RARS lineage, keeping the same educational mission and RARS-compatible memory layout so existing `.s` files run without modification.
 
 ## Download
 
-Get the latest release from the [Releases page](../../releases/latest) and extract the archive.
+Get the latest release from the **[Releases page](../../releases/latest)** and extract the archive — you get a single executable, nothing else to install.
 
 | Platform | File |
 |---|---|
@@ -14,34 +15,25 @@ Get the latest release from the [Releases page](../../releases/latest) and extra
 | macOS — Intel | `oars-macos-intel.tar.gz` |
 | Linux (x86-64) | `oars-linux-x86_64.tar.gz` |
 
-> **macOS note:** On first launch right-click → Open (or run `xattr -cr oars` in Terminal) to bypass the Gatekeeper warning.
+> **macOS:** On first launch, right-click → Open to bypass the Gatekeeper warning, or run `xattr -cr oars` in Terminal.
 
 ## Quick Start — GUI
 
-1. Launch `oars` (or `oars.exe` on Windows).
-2. Paste or type your RISC-V assembly in the editor.
-3. Press **F5** (Assemble & Run) — output appears in the Console tab.
+1. Launch `oars.exe` (Windows) or `oars` (macOS / Linux).
+2. Type or paste your RISC-V assembly in the editor pane.
+3. Click **Assemble & Run** in the toolbar — output appears in the Console tab.
+4. Use **Step** and **Backstep** to single-step through your program and undo steps.
 
 ## Quick Start — Command Line
 
 ```sh
-oars program.s                   # assemble and run
-oars program.s --trace           # print each instruction executed
-oars program.s --dump-registers  # print integer registers on exit
-oars program.s --dump-fp-registers
+oars program.s                        # assemble and run
+oars program.s --dump-registers       # print integer registers on exit
+oars program.s --dump-fp-registers    # print FP registers on exit
+oars program.s --max-steps 100000     # cap execution at N instructions
+oars program.s --start-at-main        # begin at label `main` instead of first instruction
+oars program.s --telemetry            # emit instruction count + exit code as JSON
 ```
-
-## Keyboard Shortcuts
-
-| Key | Action |
-|-----|--------|
-| `F5` | Assemble & Run |
-| `F6` | Assemble only |
-| `F7` | Step (one instruction) |
-| `F8` | Backstep (undo last step) |
-| `F9` | Stop / Reset |
-| `Ctrl+O` | Open file |
-| `Ctrl+S` | Save file |
 
 ## Your First Program
 
@@ -52,10 +44,10 @@ msg:  .asciiz "Hello, RISC-V!\n"
 
 .text
 main:
-    li   a7, 4      # syscall 4 = print string
+    li   a7, 4          # syscall 4 = print string
     la   a0, msg
     ecall
-    li   a7, 10     # syscall 10 = exit
+    li   a7, 10         # syscall 10 = exit
     ecall
 ```
 
@@ -70,23 +62,23 @@ main:
 | 5 | Read integer | — | `a0` |
 | 6 | Read float | — | `fa0` |
 | 7 | Read double | — | `fa0` |
-| 8 | Read string | `a0` = buffer, `a1` = max bytes | — |
+| 8 | Read string | `a0` = buffer address, `a1` = max bytes | — |
 | 10 | Exit | — | — |
 | 11 | Print character | `a0` = ASCII code | — |
 | 12 | Read character | — | `a0` |
-| 34 | Print hex | `a0` = value | — |
-| 35 | Print binary | `a0` = value | — |
-| 36 | Print unsigned | `a0` = value | — |
+| 34 | Print integer (hex) | `a0` = value | — |
+| 35 | Print integer (binary) | `a0` = value | — |
+| 36 | Print unsigned integer | `a0` = value | — |
 | 93 | Exit with code | `a0` = exit code | — |
 
 ## ISA Coverage
 
-| Extension | Notes |
-|-----------|-------|
+| Extension | Instructions |
+|-----------|-------------|
 | **RV32I** | All base integer instructions |
 | **RV32M** | `mul`, `mulh`, `mulhsu`, `mulhu`, `div`, `divu`, `rem`, `remu` |
-| **RV32F** | Single-precision FP (`flw`, `fsw`, arithmetic, conversions, comparisons) |
-| **RV32D** | Double-precision FP (`fld`, `fsd`, arithmetic, conversions, comparisons) |
+| **RV32F** | Single-precision FP — `flw`, `fsw`, arithmetic, conversions, comparisons |
+| **RV32D** | Double-precision FP — `fld`, `fsd`, arithmetic, conversions, comparisons |
 | **Zicsr** | `csrrw`, `csrrs`, `csrrc` + immediate variants |
 
 Pseudo-instructions: `li`, `la`, `mv`, `not`, `neg`, `nop`, `j`, `jr`, `ret`, `call`, `beqz`, `bnez`, `blez`, `bgez`, `bltz`, `bgtz`, `bgt`, `ble`, `bgtu`, `bleu`, `seqz`, `snez`, `sltz`, `sgtz`.
@@ -99,14 +91,12 @@ Pseudo-instructions: `li`, `la`, `mv`, `not`, `neg`, `nop`, `j`, `jr`, `ret`, `c
 | Data | `0x1001_0000` |
 | Stack top | `0x7FFF_EFFC` |
 
-Compatible with RARS memory layout — existing RARS `.s` files run without modification.
-
 ## Building from Source
 
 Requires Rust 1.75 or later.
 
 ```sh
-git clone <repo-url>
+git clone https://github.com/hutch-hutchins/OARS.git
 cd OARS
 cargo build --release
 ```
