@@ -1,0 +1,22 @@
+# Rust build artifacts
+/target/
+
+# Reference clones (large, not part of OARS source)
+/reference/
+
+# Golden test outputs generated locally
+/tests/golden/
+/tests/out/
+
+# Distribution artifacts
+/dist/
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
