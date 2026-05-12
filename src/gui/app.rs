@@ -9,7 +9,9 @@ use crate::assembler::{
     parser,
 };
 use crate::hardware::{
-    csr::addr as csr_addr, fp_registers::FP_REG_NAMES, memory::TEXT_BASE,
+    csr::addr as csr_addr,
+    fp_registers::FP_REG_NAMES,
+    memory::{DATA_BASE, STACK_TOP, TEXT_BASE},
     registers::REG_NAMES,
 };
 use crate::simulator::{
@@ -27,6 +29,18 @@ enum SimState {
     WaitingInput,
     Halted(i32),
     Error(String),
+}
+
+#[derive(PartialEq, Eq, Clone, Copy)]
+enum MainTab {
+    Editor,
+    TextSegment,
+}
+
+#[derive(PartialEq, Eq, Clone, Copy)]
+enum BottomTab {
+    Console,
+    Memory,
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -52,6 +66,10 @@ pub struct OarsApp {
     input_queue: VecDeque<String>,
 
     steps_per_frame: u32,
+
+    main_tab: MainTab,
+    bottom_tab: BottomTab,
+    mem_view_base: u32,
 
     register_tab: RegisterTab,
 
@@ -94,6 +112,9 @@ impl OarsApp {
             input_buf: String::new(),
             input_queue: VecDeque::new(),
             steps_per_frame: 50_000,
+            main_tab: MainTab::Editor,
+            bottom_tab: BottomTab::Console,
+            mem_view_base: DATA_BASE,
             register_tab: RegisterTab::Integer,
             prev_int_regs: [0u32; 32],
             prev_fp_regs: [0u64; 32],
@@ -173,6 +194,7 @@ impl OarsApp {
                 self.cpu = Some(cpu);
                 self.asm_out = Some(out);
                 self.sim_state = SimState::Ready;
+                self.main_tab = MainTab::TextSegment;
                 true
             }
         }
@@ -533,6 +555,95 @@ impl OarsApp {
             if resp.inner {
                 self.submit_input();
             }
+        }
+    }
+
+    fn show_memory_viewer(&mut self, ui: &mut egui::Ui) {
+        // Segment navigation
+        ui.horizontal(|ui| {
+            ui.label("Jump to:");
+            if ui.small_button(".text").clicked() {
+                self.mem_view_base = TEXT_BASE;
+            }
+            if ui.small_button(".data").clicked() {
+                self.mem_view_base = DATA_BASE;
+            }
+            if ui.small_button("stack").clicked() {
+                self.mem_view_base = STACK_TOP & !0xF;
+            }
+            ui.separator();
+            ui.label(
+                RichText::new(format!("base: {:#010x}", self.mem_view_base))
+                    .monospace()
+                    .small()
+                    .weak(),
+            );
+        });
+        ui.separator();
+
+        const ROWS: usize = 512;
+        const BYTES_PER_ROW: u32 = 16; // 4 words × 4 bytes
+
+        if let Some(cpu) = &self.cpu {
+            let base = self.mem_view_base;
+            let current_pc = cpu.pc;
+
+            TableBuilder::new(ui)
+                .striped(true)
+                .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+                .column(Column::initial(110.0).resizable(true)) // Address
+                .column(Column::initial(88.0).resizable(true))  // +0
+                .column(Column::initial(88.0).resizable(true))  // +4
+                .column(Column::initial(88.0).resizable(true))  // +8
+                .column(Column::initial(88.0).resizable(true))  // +C
+                .column(Column::remainder())                     // ASCII
+                .header(20.0, |mut h| {
+                    h.col(|ui| { ui.strong("Address"); });
+                    h.col(|ui| { ui.strong("+0"); });
+                    h.col(|ui| { ui.strong("+4"); });
+                    h.col(|ui| { ui.strong("+8"); });
+                    h.col(|ui| { ui.strong("+C"); });
+                    h.col(|ui| { ui.strong("ASCII"); });
+                })
+                .body(|body| {
+                    body.rows(18.0, ROWS, |mut row| {
+                        let i = row.index();
+                        let row_addr = base.wrapping_add(i as u32 * BYTES_PER_ROW);
+                        let words: [u32; 4] =
+                            std::array::from_fn(|j| cpu.mem.load_word(row_addr + j as u32 * 4));
+                        let hot = current_pc >= row_addr
+                            && current_pc < row_addr.wrapping_add(BYTES_PER_ROW);
+                        let addr_color = if hot {
+                            egui::Color32::YELLOW
+                        } else {
+                            egui::Color32::GRAY
+                        };
+
+                        row.col(|ui| {
+                            ui.label(
+                                RichText::new(format!("{row_addr:#010x}"))
+                                    .monospace()
+                                    .color(addr_color),
+                            );
+                        });
+                        for w in &words {
+                            row.col(|ui| {
+                                ui.label(RichText::new(format!("{w:#010x}")).monospace());
+                            });
+                        }
+                        row.col(|ui| {
+                            let ascii: String = (0..16u32)
+                                .map(|j| cpu.mem.load_byte(row_addr + j))
+                                .map(|b| if (32..127).contains(&b) { b as char } else { '.' })
+                                .collect();
+                            ui.label(RichText::new(ascii).monospace().weak());
+                        });
+                    });
+                });
+        } else {
+            ui.centered_and_justified(|ui| {
+                ui.label("Assemble first to view memory.");
+            });
         }
     }
 
@@ -904,14 +1015,20 @@ impl eframe::App for OarsApp {
             self.show_toolbar(ui);
         });
 
-        // Bottom panel: Console only
+        // Bottom panel: Console | Memory tabs
         egui::TopBottomPanel::bottom("bottom_panel")
             .resizable(true)
             .default_height(200.0)
             .show(ctx, |ui| {
-                ui.strong("Console");
+                ui.horizontal(|ui| {
+                    ui.selectable_value(&mut self.bottom_tab, BottomTab::Console, "Console");
+                    ui.selectable_value(&mut self.bottom_tab, BottomTab::Memory, "Memory");
+                });
                 ui.separator();
-                self.show_console(ui);
+                match self.bottom_tab {
+                    BottomTab::Console => self.show_console(ui),
+                    BottomTab::Memory => self.show_memory_viewer(ui),
+                }
             });
 
         // Right panel: register tabs
@@ -922,19 +1039,17 @@ impl eframe::App for OarsApp {
                 self.show_registers(ui);
             });
 
-        // Centre: Text Segment on top (large), Editor below (resizable)
+        // Centre: Editor | Text Segment tabs
         egui::CentralPanel::default().show(ctx, |ui| {
-            egui::TopBottomPanel::bottom("editor_panel")
-                .resizable(true)
-                .default_height(220.0)
-                .min_height(80.0)
-                .show_inside(ui, |ui| {
-                    self.show_editor(ui);
-                });
-
-            ui.strong("Text Segment");
+            ui.horizontal(|ui| {
+                ui.selectable_value(&mut self.main_tab, MainTab::Editor, "Editor");
+                ui.selectable_value(&mut self.main_tab, MainTab::TextSegment, "Text Segment");
+            });
             ui.separator();
-            self.show_text_segment(ui);
+            match self.main_tab {
+                MainTab::Editor => self.show_editor(ui),
+                MainTab::TextSegment => self.show_text_segment(ui),
+            }
         });
     }
 }
