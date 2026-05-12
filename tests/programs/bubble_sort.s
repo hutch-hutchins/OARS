@@ -16,7 +16,8 @@ n:      .word 5
         .globl main
 main:
         la      s0, arr
-        lw      s3, n           # s3 = n = 5
+        la      t3, n
+        lw      s3, 0(t3)       # s3 = n = 5
 
 outer:
         li      s1, 0           # i = 0

@@ -1,30 +1,37 @@
-use crate::hardware::{memory::Memory, registers::RegisterFile};
+use crate::hardware::{fp_registers::FpRegisters, memory::Memory, registers::RegisterFile};
 use crate::util::error::OarsError;
-use std::io::{self, BufRead, Write};
+use std::io::{BufRead, Write};
 
 /// Dispatch a RISC-V ECALL based on a7 (syscall number).
 /// Returns true if the program should continue, false if it should exit.
 pub fn dispatch(
-    regs: &mut RegisterFile,
-    mem: &mut Memory,
-    pc: u32,
+    regs:   &mut RegisterFile,
+    fp:     &mut FpRegisters,
+    mem:    &mut Memory,
+    pc:     u32,
     stdout: &mut dyn Write,
-    stdin: &mut dyn BufRead,
+    stdin:  &mut dyn BufRead,
 ) -> Result<bool, OarsError> {
     let num = regs.read(17); // a7
 
     match num {
-        // ── I/O ──────────────────────────────────────────────────────────────
+        // ── Integer / string I/O ──────────────────────────────────────────────
         1 => {
-            // print_int: a0 = integer
+            // print_int: a0 = signed integer
             let v = regs.read(10) as i32;
             write!(stdout, "{v}").ok();
         }
 
         2 => {
-            // print_float: a0 = float bits — Phase 2
-            let bits = regs.read(10);
-            write!(stdout, "{}", f32::from_bits(bits)).ok();
+            // print_float: fa0 (f10) = single-precision value
+            let v = fp.read_f32(10);
+            write!(stdout, "{v}").ok();
+        }
+
+        3 => {
+            // print_double: fa0 (f10) = double-precision value
+            let v = fp.read_f64(10);
+            write!(stdout, "{v}").ok();
         }
 
         4 => {
@@ -44,6 +51,26 @@ pub fn dispatch(
             regs.write(10, v as u32);
         }
 
+        6 => {
+            // read_float → fa0 (f10)
+            let _ = stdout.flush();
+            let mut line = String::new();
+            stdin.read_line(&mut line)
+                .map_err(|e| OarsError::Syscall { number: num, msg: e.to_string() })?;
+            let v: f32 = line.trim().parse().unwrap_or(0.0);
+            fp.write_f32(10, v);
+        }
+
+        7 => {
+            // read_double → fa0 (f10)
+            let _ = stdout.flush();
+            let mut line = String::new();
+            stdin.read_line(&mut line)
+                .map_err(|e| OarsError::Syscall { number: num, msg: e.to_string() })?;
+            let v: f64 = line.trim().parse().unwrap_or(0.0);
+            fp.write_f64(10, v);
+        }
+
         8 => {
             // read_string: a0 = buffer address, a1 = max length
             let _ = stdout.flush();
@@ -58,8 +85,15 @@ pub fn dispatch(
             mem.store_byte(addr + n as u32, 0);
         }
 
-        10 => {
-            // exit
+        9 => {
+            // sbrk: a0 = number of bytes → a0 = base address
+            let size = regs.read(10);
+            let ptr = mem.sbrk(size)?;
+            regs.write(10, ptr);
+        }
+
+        10 | 17 => {
+            // exit / exit2
             return Ok(false);
         }
 
@@ -79,20 +113,6 @@ pub fn dispatch(
             regs.write(10, c);
         }
 
-        17 => {
-            // exit2: exit code in a0
-            return Ok(false);
-        }
-
-        // ── Heap allocation ───────────────────────────────────────────────────
-        9 => {
-            // sbrk: a0 = number of bytes to allocate → a0 = base address
-            let size = regs.read(10);
-            let ptr = mem.sbrk(size)?;
-            regs.write(10, ptr);
-        }
-
-        // ── Unknown ───────────────────────────────────────────────────────────
         _ => {
             return Err(OarsError::Syscall {
                 number: num,

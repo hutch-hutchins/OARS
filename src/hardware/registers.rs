@@ -33,6 +33,9 @@ impl RegisterFile {
             .map(|i| (format!("x{:02}({})", i, REG_NAMES[i]), self.regs[i]))
             .collect()
     }
+
+    pub fn snapshot(&self) -> [u32; NUM_REGS] { self.regs }
+    pub fn restore(&mut self, snap: &[u32; NUM_REGS]) { self.regs = *snap; self.regs[0] = 0; }
 }
 
 impl Default for RegisterFile {

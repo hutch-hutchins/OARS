@@ -17,9 +17,13 @@ pub struct Cli {
 
 #[derive(Args, Debug, Default)]
 pub struct RunOpts {
-    /// Dump all register values after execution
+    /// Dump integer register values after execution
     #[arg(long)]
     pub dump_registers: bool,
+
+    /// Dump floating-point register values after execution
+    #[arg(long)]
+    pub dump_fp_registers: bool,
 
     /// Maximum number of instructions to execute (0 = unlimited)
     #[arg(long, default_value_t = 0)]
@@ -58,9 +62,16 @@ pub fn run_headless(path: PathBuf, opts: &RunOpts) -> Result<()> {
 
     // Post-run output
     if opts.dump_registers {
-        eprintln!("\n── Registers ──────────────────────────────────────────");
+        eprintln!("\n── Integer Registers ───────────────────────────────────");
         for (name, val) in cpu.regs.dump() {
-            eprintln!("  {name} = {val:#010x}  ({val})");
+            eprintln!("  {name} = {val:#010x}  ({})", val as i32);
+        }
+    }
+
+    if opts.dump_fp_registers {
+        eprintln!("\n── FP Registers ────────────────────────────────────────");
+        for (name, val) in cpu.fp.dump() {
+            eprintln!("  {name} = {val:.6}");
         }
     }
 

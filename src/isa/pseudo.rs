@@ -9,6 +9,7 @@
 #[derive(Debug, Clone)]
 pub enum Operand {
     Reg(usize),
+    FpReg(usize),
     Imm(i32),
     Label(String),
     MemOff(i32, usize), // offset(reg)
@@ -132,6 +133,35 @@ pub fn expand(mnemonic: &str, ops: &[Operand]) -> Option<Vec<RealInstr>> {
         "bleu" => {
             let (rs, rt, lbl) = (ops[0].clone(), ops[1].clone(), ops[2].clone());
             vec![RealInstr::new("bgeu", vec![rt, rs, lbl])]
+        }
+
+        // ── FP pseudo-instructions ────────────────────────────────────────────
+        // fmv.s/d fd, fs  →  fsgnj.s/d fd, fs, fs   (copy with sign preserved)
+        "fmv.s" => {
+            let (fd, fs) = (ops[0].clone(), ops[1].clone());
+            vec![RealInstr::new("fsgnj.s", vec![fd, fs.clone(), fs])]
+        }
+        "fmv.d" => {
+            let (fd, fs) = (ops[0].clone(), ops[1].clone());
+            vec![RealInstr::new("fsgnj.d", vec![fd, fs.clone(), fs])]
+        }
+        // fabs.s/d fd, fs  →  fsgnjx.s/d fd, fs, fs
+        "fabs.s" => {
+            let (fd, fs) = (ops[0].clone(), ops[1].clone());
+            vec![RealInstr::new("fsgnjx.s", vec![fd, fs.clone(), fs])]
+        }
+        "fabs.d" => {
+            let (fd, fs) = (ops[0].clone(), ops[1].clone());
+            vec![RealInstr::new("fsgnjx.d", vec![fd, fs.clone(), fs])]
+        }
+        // fneg.s/d fd, fs  →  fsgnjn.s/d fd, fs, fs
+        "fneg.s" => {
+            let (fd, fs) = (ops[0].clone(), ops[1].clone());
+            vec![RealInstr::new("fsgnjn.s", vec![fd, fs.clone(), fs])]
+        }
+        "fneg.d" => {
+            let (fd, fs) = (ops[0].clone(), ops[1].clone());
+            vec![RealInstr::new("fsgnjn.d", vec![fd, fs.clone(), fs])]
         }
 
         _ => return None,

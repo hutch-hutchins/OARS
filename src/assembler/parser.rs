@@ -20,6 +20,7 @@ impl ParseError {
 #[derive(Debug, Clone)]
 pub enum Operand {
     Reg(usize),
+    FpReg(usize),
     Imm(i32),
     Label(String),
     MemOff(i32, usize), // offset(base_reg)
@@ -38,10 +39,15 @@ pub enum DataItem {
     Half(i16),
     Word(i32),
     Float(f32),
+    Double(f64),
     String(String),  // null-terminated (.string / .asciiz)
     Ascii(String),   // no null terminator (.ascii)
     Space(u32),
     Align(u32),
+    // Multi-value variants (e.g. .word 1, 2, 3)
+    Words(Vec<i32>),
+    Halfs(Vec<i16>),
+    Bytes(Vec<i8>),
 }
 
 #[derive(Debug, Clone)]
@@ -150,24 +156,43 @@ impl Parser {
             "word" => {
                 let vals = self.parse_int_list()?;
                 self.expect_newline_or_eof()?;
-                // Emit multiple Word items; caller iterates
-                // For simplicity, wrap in a Vec — handled by flattening in pass1
-                // We emit one statement per value
-                Statement::Data(DataItem::Word(vals[0] as i32), span.clone())
-                // TODO: handle multiple values — for now emit first only
-                // (full multi-value handled in the codegen loop)
+                if vals.len() == 1 {
+                    Statement::Data(DataItem::Word(vals[0] as i32), span.clone())
+                } else {
+                    Statement::Data(DataItem::Words(vals.iter().map(|v| *v as i32).collect()), span.clone())
+                }
             }
 
             "byte" => {
                 let vals = self.parse_int_list()?;
                 self.expect_newline_or_eof()?;
-                Statement::Data(DataItem::Byte(vals[0] as i8), span.clone())
+                if vals.len() == 1 {
+                    Statement::Data(DataItem::Byte(vals[0] as i8), span.clone())
+                } else {
+                    Statement::Data(DataItem::Bytes(vals.iter().map(|v| *v as i8).collect()), span.clone())
+                }
             }
 
             "half" | "short" => {
                 let vals = self.parse_int_list()?;
                 self.expect_newline_or_eof()?;
-                Statement::Data(DataItem::Half(vals[0] as i16), span.clone())
+                if vals.len() == 1 {
+                    Statement::Data(DataItem::Half(vals[0] as i16), span.clone())
+                } else {
+                    Statement::Data(DataItem::Halfs(vals.iter().map(|v| *v as i16).collect()), span.clone())
+                }
+            }
+
+            "float" => {
+                let v = self.expect_float()?;
+                self.expect_newline_or_eof()?;
+                Statement::Data(DataItem::Float(v as f32), span.clone())
+            }
+
+            "double" => {
+                let v = self.expect_float()?;
+                self.expect_newline_or_eof()?;
+                Statement::Data(DataItem::Double(v), span.clone())
             }
 
             "string" | "asciiz" => {
@@ -225,11 +250,12 @@ impl Parser {
         match self.peek_token().clone() {
             Token::Ident(name) => {
                 self.advance();
-                // Could be a register, label, or %hi/%lo modifier
                 if let Some(idx) = crate::hardware::registers::parse_reg(&name) {
                     return Ok(Operand::Reg(idx));
                 }
-                // Check for mem-offset form that follows: might be integer(reg) coming up
+                if let Some(idx) = crate::hardware::fp_registers::parse_fp_reg(&name) {
+                    return Ok(Operand::FpReg(idx));
+                }
                 Ok(Operand::Label(name))
             }
 
@@ -311,6 +337,15 @@ impl Parser {
         match self.peek_token().clone() {
             Token::Ident(s) => { self.advance(); Ok(s) }
             tok => Err(ParseError::at(&span, format!("expected identifier, got {tok:?}"))),
+        }
+    }
+
+    fn expect_float(&mut self) -> Result<f64, ParseError> {
+        let span = self.peek_span().clone();
+        match self.peek_token().clone() {
+            Token::Float(v)   => { self.advance(); Ok(v) }
+            Token::Integer(v) => { self.advance(); Ok(v as f64) }
+            tok => Err(ParseError::at(&span, format!("expected float, got {tok:?}"))),
         }
     }
 
