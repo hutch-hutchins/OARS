@@ -51,7 +51,7 @@ jobs:
         run: cargo fmt --check
 
       - name: Clippy (warnings = errors)
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --all-targets -- -D warnings
 
       - name: Build (debug)
         run: cargo build

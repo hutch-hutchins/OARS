@@ -3,6 +3,8 @@ use crate::isa::formats as f;
 use crate::util::error::OarsError;
 
 /// Execute one RV32M instruction (opcode 0x33, funct7 = 0x01).
+// RISC-V spec defines exact results for div-by-zero and overflow — can't use checked_div.
+#[allow(clippy::manual_checked_ops)]
 pub fn step(word: u32, pc: u32, regs: &mut RegisterFile) -> Result<u32, OarsError> {
     let a = regs.read(f::rs1(word));
     let b = regs.read(f::rs2(word));
