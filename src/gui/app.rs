@@ -30,12 +30,6 @@ enum SimState {
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
-enum MainTab {
-    Editor,
-    TextSegment,
-}
-
-#[derive(PartialEq, Eq, Clone, Copy)]
 enum RegisterTab {
     Integer,
     Float,
@@ -59,7 +53,6 @@ pub struct OarsApp {
 
     steps_per_frame: u32,
 
-    main_tab: MainTab,
     register_tab: RegisterTab,
 
     // Register snapshots for change highlighting
@@ -101,7 +94,6 @@ impl OarsApp {
             input_buf: String::new(),
             input_queue: VecDeque::new(),
             steps_per_frame: 50_000,
-            main_tab: MainTab::Editor,
             register_tab: RegisterTab::Integer,
             prev_int_regs: [0u32; 32],
             prev_fp_regs: [0u64; 32],
@@ -181,7 +173,6 @@ impl OarsApp {
                 self.cpu = Some(cpu);
                 self.asm_out = Some(out);
                 self.sim_state = SimState::Ready;
-                self.main_tab = MainTab::TextSegment;
                 true
             }
         }
@@ -555,8 +546,8 @@ impl OarsApp {
                 .striped(true)
                 .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
                 .column(Column::initial(20.0).resizable(false))
-                .column(Column::initial(95.0))
-                .column(Column::initial(95.0))
+                .column(Column::initial(110.0).resizable(true))
+                .column(Column::initial(100.0).resizable(true))
                 .column(Column::remainder())
                 .header(20.0, |mut h| {
                     h.col(|_| {});
@@ -931,21 +922,19 @@ impl eframe::App for OarsApp {
                 self.show_registers(ui);
             });
 
-        // Centre: Editor | Text Segment tabs
+        // Centre: Text Segment on top (large), Editor below (resizable)
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                ui.selectable_value(&mut self.main_tab, MainTab::Editor, "Editor");
-                ui.selectable_value(
-                    &mut self.main_tab,
-                    MainTab::TextSegment,
-                    "Text Segment",
-                );
-            });
+            egui::TopBottomPanel::bottom("editor_panel")
+                .resizable(true)
+                .default_height(220.0)
+                .min_height(80.0)
+                .show_inside(ui, |ui| {
+                    self.show_editor(ui);
+                });
+
+            ui.strong("Text Segment");
             ui.separator();
-            match self.main_tab {
-                MainTab::Editor => self.show_editor(ui),
-                MainTab::TextSegment => self.show_text_segment(ui),
-            }
+            self.show_text_segment(ui);
         });
     }
 }
