@@ -41,8 +41,12 @@ fn golden(name: &str) -> String {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/golden")
         .join(name);
-    std::fs::read_to_string(&path)
-        .unwrap_or_else(|_| panic!("golden file not found: {} — run RARS headless to generate it", path.display()))
+    std::fs::read_to_string(&path).unwrap_or_else(|_| {
+        panic!(
+            "golden file not found: {} — run RARS headless to generate it",
+            path.display()
+        )
+    })
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

@@ -27,15 +27,15 @@ pub fn step(
             let v = match (f::funct3(word), f::funct7(word)) {
                 (0x0, 0x00) => a.wrapping_add(b),
                 (0x0, 0x20) => a.wrapping_sub(b),
-                (0x1, _)    => a << (b & 0x1F),
-                (0x2, _)    => ((a as i32) < (b as i32)) as u32,
-                (0x3, _)    => (a < b) as u32,
-                (0x4, _)    => a ^ b,
+                (0x1, _) => a << (b & 0x1F),
+                (0x2, _) => ((a as i32) < (b as i32)) as u32,
+                (0x3, _) => (a < b) as u32,
+                (0x4, _) => a ^ b,
                 (0x5, 0x00) => a >> (b & 0x1F),
                 (0x5, 0x20) => ((a as i32) >> (b & 0x1F)) as u32,
-                (0x6, _)    => a | b,
-                (0x7, _)    => a & b,
-                _           => return Err(illegal(pc, word)),
+                (0x6, _) => a | b,
+                (0x7, _) => a & b,
+                _ => return Err(illegal(pc, word)),
             };
             regs.write(f::rd(word), v);
             Ok(StepResult::Next(pc.wrapping_add(4)))
@@ -43,7 +43,7 @@ pub fn step(
 
         // ── I-type arithmetic ────────────────────────────────────────────────
         0x13 => {
-            let a   = regs.read(f::rs1(word));
+            let a = regs.read(f::rs1(word));
             let imm = f::imm_i(word);
             let v = match f::funct3(word) {
                 0x0 => a.wrapping_add(imm as u32),
@@ -55,8 +55,11 @@ pub fn step(
                 0x1 => a << (imm & 0x1F) as u32,
                 0x5 => {
                     let shamt = (imm as u32) & 0x1F;
-                    if f::funct7(word) == 0x20 { ((a as i32) >> shamt) as u32 }
-                    else                       { a >> shamt }
+                    if f::funct7(word) == 0x20 {
+                        ((a as i32) >> shamt) as u32
+                    } else {
+                        a >> shamt
+                    }
                 }
                 _ => return Err(illegal(pc, word)),
             };
@@ -82,7 +85,7 @@ pub fn step(
         // ── Store ─────────────────────────────────────────────────────────────
         0x23 => {
             let addr = (regs.read(f::rs1(word)) as i32).wrapping_add(f::imm_s(word)) as u32;
-            let val  = regs.read(f::rs2(word));
+            let val = regs.read(f::rs2(word));
             match f::funct3(word) {
                 0x0 => mem.store_byte(addr, val as u8),
                 0x1 => mem.store_halfword(addr, val as u16),
@@ -122,7 +125,8 @@ pub fn step(
 
         // ── JALR ──────────────────────────────────────────────────────────────
         0x67 => {
-            let target = ((regs.read(f::rs1(word)) as i32).wrapping_add(f::imm_i(word)) as u32) & !1;
+            let target =
+                ((regs.read(f::rs1(word)) as i32).wrapping_add(f::imm_i(word)) as u32) & !1;
             regs.write(f::rd(word), pc.wrapping_add(4));
             Ok(StepResult::Next(target))
         }
@@ -154,5 +158,8 @@ pub fn step(
 }
 
 fn illegal(pc: u32, word: u32) -> OarsError {
-    OarsError::Runtime { pc, msg: format!("illegal instruction {word:#010x}") }
+    OarsError::Runtime {
+        pc,
+        msg: format!("illegal instruction {word:#010x}"),
+    }
 }

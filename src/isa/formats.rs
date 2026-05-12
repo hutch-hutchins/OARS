@@ -1,11 +1,29 @@
 // ─── Decode helpers ───────────────────────────────────────────────────────────
 
-#[inline] pub fn opcode(w: u32) -> u32  { w & 0x7F }
-#[inline] pub fn rd(w: u32)     -> usize { ((w >> 7)  & 0x1F) as usize }
-#[inline] pub fn funct3(w: u32) -> u32  { (w >> 12) & 0x7 }
-#[inline] pub fn rs1(w: u32)    -> usize { ((w >> 15) & 0x1F) as usize }
-#[inline] pub fn rs2(w: u32)    -> usize { ((w >> 20) & 0x1F) as usize }
-#[inline] pub fn funct7(w: u32) -> u32  { w >> 25 }
+#[inline]
+pub fn opcode(w: u32) -> u32 {
+    w & 0x7F
+}
+#[inline]
+pub fn rd(w: u32) -> usize {
+    ((w >> 7) & 0x1F) as usize
+}
+#[inline]
+pub fn funct3(w: u32) -> u32 {
+    (w >> 12) & 0x7
+}
+#[inline]
+pub fn rs1(w: u32) -> usize {
+    ((w >> 15) & 0x1F) as usize
+}
+#[inline]
+pub fn rs2(w: u32) -> usize {
+    ((w >> 20) & 0x1F) as usize
+}
+#[inline]
+pub fn funct7(w: u32) -> u32 {
+    w >> 25
+}
 
 /// Sign-extend a `width`-bit value to i32.
 #[inline]
@@ -15,7 +33,10 @@ pub fn sext(val: u32, width: u32) -> i32 {
 }
 
 /// I-type immediate [11:0], sign-extended.
-#[inline] pub fn imm_i(w: u32) -> i32 { sext(w >> 20, 12) }
+#[inline]
+pub fn imm_i(w: u32) -> i32 {
+    sext(w >> 20, 12)
+}
 
 /// S-type immediate, sign-extended.
 #[inline]
@@ -34,7 +55,10 @@ pub fn imm_b(w: u32) -> i32 {
 }
 
 /// U-type immediate (already shifted to bits [31:12]).
-#[inline] pub fn imm_u(w: u32) -> u32 { w & 0xFFFF_F000 }
+#[inline]
+pub fn imm_u(w: u32) -> u32 {
+    w & 0xFFFF_F000
+}
 
 /// J-type immediate (byte offset), sign-extended.
 #[inline]
@@ -42,7 +66,7 @@ pub fn imm_j(w: u32) -> i32 {
     let imm = ((w >> 21) & 0x3FF) << 1  // bits 10:1
             | ((w >> 20) & 0x1)   << 11 // bit  11
             | ((w >> 12) & 0xFF)  << 12 // bits 19:12
-            | ((w >> 31) & 0x1)   << 20;// bit  20
+            | ((w >> 31) & 0x1)   << 20; // bit  20
     sext(imm, 21)
 }
 
@@ -67,12 +91,18 @@ pub fn enc_s(f3: u32, rs1: u32, rs2: u32, imm: i32) -> u32 {
 #[inline]
 pub fn enc_b(f3: u32, rs1: u32, rs2: u32, imm: i32) -> u32 {
     let i = (imm as u32) & 0x1FFF;
-    let imm12   = (i >> 12) & 1;
-    let imm11   = (i >> 11) & 1;
-    let imm10_5 = (i >>  5) & 0x3F;
-    let imm4_1  = (i >>  1) & 0xF;
-    (imm12 << 31) | (imm10_5 << 25) | (rs2 << 20) | (rs1 << 15)
-        | (f3 << 12) | (imm4_1 << 8) | (imm11 << 7) | 0x63
+    let imm12 = (i >> 12) & 1;
+    let imm11 = (i >> 11) & 1;
+    let imm10_5 = (i >> 5) & 0x3F;
+    let imm4_1 = (i >> 1) & 0xF;
+    (imm12 << 31)
+        | (imm10_5 << 25)
+        | (rs2 << 20)
+        | (rs1 << 15)
+        | (f3 << 12)
+        | (imm4_1 << 8)
+        | (imm11 << 7)
+        | 0x63
 }
 
 #[inline]
@@ -83,10 +113,10 @@ pub fn enc_u(opc: u32, rd: u32, imm: u32) -> u32 {
 #[inline]
 pub fn enc_j(rd: u32, imm: i32) -> u32 {
     let i = (imm as u32) & 0x1F_FFFF;
-    let imm20    = (i >> 20) & 1;
+    let imm20 = (i >> 20) & 1;
     let imm19_12 = (i >> 12) & 0xFF;
-    let imm11    = (i >> 11) & 1;
-    let imm10_1  = (i >>  1) & 0x3FF;
+    let imm11 = (i >> 11) & 1;
+    let imm10_1 = (i >> 1) & 0x3FF;
     (imm20 << 31) | (imm10_1 << 21) | (imm11 << 20) | (imm19_12 << 12) | (rd << 7) | 0x6F
 }
 

@@ -61,7 +61,12 @@ pub struct Lexer<'src> {
 
 impl<'src> Lexer<'src> {
     pub fn new(src: &'src str) -> Self {
-        Self { src, pos: 0, line: 1, col: 1 }
+        Self {
+            src,
+            pos: 0,
+            line: 1,
+            col: 1,
+        }
     }
 
     /// Tokenize an entire source string.
@@ -148,7 +153,13 @@ impl<'src> Lexer<'src> {
     }
 
     fn spanned(&self, token: Token) -> Spanned {
-        Spanned { token, span: Span { line: self.line, col: self.col } }
+        Spanned {
+            token,
+            span: Span {
+                line: self.line,
+                col: self.col,
+            },
+        }
     }
 
     fn bump_newline(&mut self) {
@@ -184,25 +195,43 @@ impl<'src> Lexer<'src> {
     // ── Token constructors ────────────────────────────────────────────────────
 
     fn lex_directive(&mut self) -> Spanned {
-        let span = Span { line: self.line, col: self.col };
+        let span = Span {
+            line: self.line,
+            col: self.col,
+        };
         self.advance(); // consume '.'
         let name = self.read_while(is_ident_continue).to_owned();
-        Spanned { token: Token::Directive(name), span }
+        Spanned {
+            token: Token::Directive(name),
+            span,
+        }
     }
 
     fn lex_ident_or_label(&mut self) -> Spanned {
-        let span = Span { line: self.line, col: self.col };
+        let span = Span {
+            line: self.line,
+            col: self.col,
+        };
         let name = self.read_while(is_ident_continue).to_owned();
         if !self.is_at_end() && self.peek() == ':' {
             self.advance(); // consume ':'
-            Spanned { token: Token::Label(name), span }
+            Spanned {
+                token: Token::Label(name),
+                span,
+            }
         } else {
-            Spanned { token: Token::Ident(name), span }
+            Spanned {
+                token: Token::Ident(name),
+                span,
+            }
         }
     }
 
     fn lex_number(&mut self) -> Result<Spanned, LexError> {
-        let span = Span { line: self.line, col: self.col };
+        let span = Span {
+            line: self.line,
+            col: self.col,
+        };
         let start = self.pos;
 
         // Optional leading minus
@@ -242,7 +271,10 @@ impl<'src> Lexer<'src> {
                 col: span.col,
                 src: raw.to_owned(),
             })?;
-            return Ok(Spanned { token: Token::Float(val), span });
+            return Ok(Spanned {
+                token: Token::Float(val),
+                span,
+            });
         }
 
         let raw = &self.src[start..self.pos];
@@ -251,16 +283,25 @@ impl<'src> Lexer<'src> {
             col: span.col,
             src: raw.to_owned(),
         })?;
-        Ok(Spanned { token: Token::Integer(val), span })
+        Ok(Spanned {
+            token: Token::Integer(val),
+            span,
+        })
     }
 
     fn lex_string(&mut self) -> Result<Spanned, LexError> {
-        let span = Span { line: self.line, col: self.col };
+        let span = Span {
+            line: self.line,
+            col: self.col,
+        };
         self.advance(); // consume opening '"'
         let mut s = String::new();
         loop {
             if self.is_at_end() || self.peek() == '\n' {
-                return Err(LexError::UnterminatedString { line: span.line, col: span.col });
+                return Err(LexError::UnterminatedString {
+                    line: span.line,
+                    col: span.col,
+                });
             }
             let c = self.peek();
             self.advance();
@@ -286,11 +327,17 @@ impl<'src> Lexer<'src> {
                 s.push(c);
             }
         }
-        Ok(Spanned { token: Token::StringLit(s), span })
+        Ok(Spanned {
+            token: Token::StringLit(s),
+            span,
+        })
     }
 
     fn lex_char(&mut self) -> Result<Spanned, LexError> {
-        let span = Span { line: self.line, col: self.col };
+        let span = Span {
+            line: self.line,
+            col: self.col,
+        };
         self.advance(); // consume opening '\''
         let c = self.peek();
         self.advance();
@@ -312,7 +359,10 @@ impl<'src> Lexer<'src> {
         if !self.is_at_end() && self.peek() == '\'' {
             self.advance();
         }
-        Ok(Spanned { token: Token::CharLit(byte), span })
+        Ok(Spanned {
+            token: Token::CharLit(byte),
+            span,
+        })
     }
 }
 
@@ -453,10 +503,7 @@ mod tests {
 
     #[test]
     fn string_simple() {
-        assert_eq!(
-            tokens(r#""hello""#),
-            vec![Token::StringLit("hello".into())]
-        );
+        assert_eq!(tokens(r#""hello""#), vec![Token::StringLit("hello".into())]);
     }
 
     #[test]
@@ -501,12 +548,18 @@ mod tests {
 
     #[test]
     fn comment_hash_ignored() {
-        assert_eq!(tokens("add # this is a comment"), vec![Token::Ident("add".into())]);
+        assert_eq!(
+            tokens("add # this is a comment"),
+            vec![Token::Ident("add".into())]
+        );
     }
 
     #[test]
     fn comment_semicolon_ignored() {
-        assert_eq!(tokens("add ; semicolon comment"), vec![Token::Ident("add".into())]);
+        assert_eq!(
+            tokens("add ; semicolon comment"),
+            vec![Token::Ident("add".into())]
+        );
     }
 
     // ── Full instruction lines ────────────────────────────────────────────────
@@ -556,7 +609,10 @@ mod tests {
     #[test]
     fn span_tracks_line_and_col() {
         let spanned = Lexer::tokenize("add\nsub").unwrap();
-        let sub = spanned.iter().find(|s| s.token == Token::Ident("sub".into())).unwrap();
+        let sub = spanned
+            .iter()
+            .find(|s| s.token == Token::Ident("sub".into()))
+            .unwrap();
         assert_eq!(sub.span.line, 2);
         assert_eq!(sub.span.col, 1);
     }

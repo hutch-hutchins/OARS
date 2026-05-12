@@ -43,8 +43,8 @@ pub fn run_headless(path: PathBuf, opts: &RunOpts) -> Result<()> {
         .with_context(|| format!("cannot read {}", path.display()))?;
 
     // Parse
-    let stmts = parser::parse(&src)
-        .with_context(|| format!("parse error in {}", path.display()))?;
+    let stmts =
+        parser::parse(&src).with_context(|| format!("parse error in {}", path.display()))?;
 
     // Assemble into a fresh memory image
     let mut cpu = CpuState::new(crate::hardware::memory::TEXT_BASE);

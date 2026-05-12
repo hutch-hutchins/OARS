@@ -11,7 +11,11 @@ pub enum ParseError {
 
 impl ParseError {
     fn at(span: &Span, msg: impl Into<String>) -> Self {
-        Self::Parse { line: span.line, col: span.col, msg: msg.into() }
+        Self::Parse {
+            line: span.line,
+            col: span.col,
+            msg: msg.into(),
+        }
     }
 }
 
@@ -40,8 +44,8 @@ pub enum DataItem {
     Word(i32),
     Float(f32),
     Double(f64),
-    String(String),  // null-terminated (.string / .asciiz)
-    Ascii(String),   // no null terminator (.ascii)
+    String(String), // null-terminated (.string / .asciiz)
+    Ascii(String),  // no null terminator (.ascii)
     Space(u32),
     Align(u32),
     // Multi-value variants (e.g. .word 1, 2, 3)
@@ -60,7 +64,10 @@ pub enum Statement {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Seg { Text, Data }
+pub enum Seg {
+    Text,
+    Data,
+}
 
 // ─── Parser ──────────────────────────────────────────────────────────────────
 
@@ -86,7 +93,9 @@ impl Parser {
 
     fn advance(&mut self) -> &Token {
         let t = &self.tokens[self.pos].token;
-        if self.pos + 1 < self.tokens.len() { self.pos += 1; }
+        if self.pos + 1 < self.tokens.len() {
+            self.pos += 1;
+        }
         t
     }
 
@@ -98,7 +107,10 @@ impl Parser {
 
     fn expect_newline_or_eof(&mut self) -> Result<(), ParseError> {
         match self.peek_token() {
-            Token::Newline | Token::Eof => { self.advance(); Ok(()) }
+            Token::Newline | Token::Eof => {
+                self.advance();
+                Ok(())
+            }
             _ => Err(ParseError::at(self.peek_span(), "expected end of line")),
         }
     }
@@ -107,7 +119,9 @@ impl Parser {
         let mut stmts = Vec::new();
         loop {
             self.skip_newlines();
-            if matches!(self.peek_token(), Token::Eof) { break; }
+            if matches!(self.peek_token(), Token::Eof) {
+                break;
+            }
             if let Some(s) = self.parse_statement()? {
                 stmts.push(s);
             }
@@ -133,7 +147,11 @@ impl Parser {
                 self.advance();
                 let ops = self.parse_operands()?;
                 self.expect_newline_or_eof()?;
-                Ok(Some(Statement::Instr(Instruction { mnemonic, ops, span })))
+                Ok(Some(Statement::Instr(Instruction {
+                    mnemonic,
+                    ops,
+                    span,
+                })))
             }
 
             Token::Newline | Token::Eof => Ok(None),
@@ -144,8 +162,14 @@ impl Parser {
 
     fn parse_directive(&mut self, dir: &str, span: &Span) -> Result<Statement, ParseError> {
         Ok(match dir {
-            "text" => { self.expect_newline_or_eof()?; Statement::Segment(Seg::Text, span.clone()) }
-            "data" => { self.expect_newline_or_eof()?; Statement::Segment(Seg::Data, span.clone()) }
+            "text" => {
+                self.expect_newline_or_eof()?;
+                Statement::Segment(Seg::Text, span.clone())
+            }
+            "data" => {
+                self.expect_newline_or_eof()?;
+                Statement::Segment(Seg::Data, span.clone())
+            }
 
             "globl" | "global" => {
                 let name = self.expect_ident()?;
@@ -159,7 +183,10 @@ impl Parser {
                 if vals.len() == 1 {
                     Statement::Data(DataItem::Word(vals[0] as i32), span.clone())
                 } else {
-                    Statement::Data(DataItem::Words(vals.iter().map(|v| *v as i32).collect()), span.clone())
+                    Statement::Data(
+                        DataItem::Words(vals.iter().map(|v| *v as i32).collect()),
+                        span.clone(),
+                    )
                 }
             }
 
@@ -169,7 +196,10 @@ impl Parser {
                 if vals.len() == 1 {
                     Statement::Data(DataItem::Byte(vals[0] as i8), span.clone())
                 } else {
-                    Statement::Data(DataItem::Bytes(vals.iter().map(|v| *v as i8).collect()), span.clone())
+                    Statement::Data(
+                        DataItem::Bytes(vals.iter().map(|v| *v as i8).collect()),
+                        span.clone(),
+                    )
                 }
             }
 
@@ -179,7 +209,10 @@ impl Parser {
                 if vals.len() == 1 {
                     Statement::Data(DataItem::Half(vals[0] as i16), span.clone())
                 } else {
-                    Statement::Data(DataItem::Halfs(vals.iter().map(|v| *v as i16).collect()), span.clone())
+                    Statement::Data(
+                        DataItem::Halfs(vals.iter().map(|v| *v as i16).collect()),
+                        span.clone(),
+                    )
                 }
             }
 
@@ -225,7 +258,7 @@ impl Parser {
                     self.advance();
                 }
                 self.expect_newline_or_eof()?;
-                return Ok(Statement::Globl(String::new())) // placeholder no-op
+                return Ok(Statement::Globl(String::new())); // placeholder no-op
             }
         })
     }
@@ -235,7 +268,9 @@ impl Parser {
         loop {
             match self.peek_token() {
                 Token::Newline | Token::Eof => break,
-                Token::Comma => { self.advance(); }
+                Token::Comma => {
+                    self.advance();
+                }
                 _ => {
                     let op = self.parse_one_operand()?;
                     ops.push(op);
@@ -291,7 +326,10 @@ impl Parser {
                 Ok(Operand::Label(format!(".{name}")))
             }
 
-            tok => Err(ParseError::at(&span, format!("expected operand, got {tok:?}"))),
+            tok => Err(ParseError::at(
+                &span,
+                format!("expected operand, got {tok:?}"),
+            )),
         }
     }
 
@@ -303,15 +341,24 @@ impl Parser {
                 crate::hardware::registers::parse_reg(&name)
                     .ok_or_else(|| ParseError::at(&span, format!("not a register: {name}")))
             }
-            tok => Err(ParseError::at(&span, format!("expected register, got {tok:?}"))),
+            tok => Err(ParseError::at(
+                &span,
+                format!("expected register, got {tok:?}"),
+            )),
         }
     }
 
     fn expect_int(&mut self) -> Result<i64, ParseError> {
         let span = self.peek_span().clone();
         match self.peek_token().clone() {
-            Token::Integer(v) => { self.advance(); Ok(v) }
-            tok => Err(ParseError::at(&span, format!("expected integer, got {tok:?}"))),
+            Token::Integer(v) => {
+                self.advance();
+                Ok(v)
+            }
+            tok => Err(ParseError::at(
+                &span,
+                format!("expected integer, got {tok:?}"),
+            )),
         }
     }
 
@@ -327,32 +374,56 @@ impl Parser {
     fn expect_string(&mut self) -> Result<String, ParseError> {
         let span = self.peek_span().clone();
         match self.peek_token().clone() {
-            Token::StringLit(s) => { self.advance(); Ok(s) }
-            tok => Err(ParseError::at(&span, format!("expected string, got {tok:?}"))),
+            Token::StringLit(s) => {
+                self.advance();
+                Ok(s)
+            }
+            tok => Err(ParseError::at(
+                &span,
+                format!("expected string, got {tok:?}"),
+            )),
         }
     }
 
     fn expect_ident(&mut self) -> Result<String, ParseError> {
         let span = self.peek_span().clone();
         match self.peek_token().clone() {
-            Token::Ident(s) => { self.advance(); Ok(s) }
-            tok => Err(ParseError::at(&span, format!("expected identifier, got {tok:?}"))),
+            Token::Ident(s) => {
+                self.advance();
+                Ok(s)
+            }
+            tok => Err(ParseError::at(
+                &span,
+                format!("expected identifier, got {tok:?}"),
+            )),
         }
     }
 
     fn expect_float(&mut self) -> Result<f64, ParseError> {
         let span = self.peek_span().clone();
         match self.peek_token().clone() {
-            Token::Float(v)   => { self.advance(); Ok(v) }
-            Token::Integer(v) => { self.advance(); Ok(v as f64) }
-            tok => Err(ParseError::at(&span, format!("expected float, got {tok:?}"))),
+            Token::Float(v) => {
+                self.advance();
+                Ok(v)
+            }
+            Token::Integer(v) => {
+                self.advance();
+                Ok(v as f64)
+            }
+            tok => Err(ParseError::at(
+                &span,
+                format!("expected float, got {tok:?}"),
+            )),
         }
     }
 
     fn expect_rparen(&mut self) -> Result<(), ParseError> {
         let span = self.peek_span().clone();
         match self.peek_token() {
-            Token::RParen => { self.advance(); Ok(()) }
+            Token::RParen => {
+                self.advance();
+                Ok(())
+            }
             tok => Err(ParseError::at(&span, format!("expected ')', got {tok:?}"))),
         }
     }

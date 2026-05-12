@@ -74,25 +74,31 @@ pub fn expand(mnemonic: &str, ops: &[Operand]) -> Option<Vec<RealInstr>> {
         // li rd, imm — single or double instruction
         "li" => {
             let rd = ops[0].clone();
-            let imm = match &ops[1] { Imm(v) => *v, _ => return None };
+            let imm = match &ops[1] {
+                Imm(v) => *v,
+                _ => return None,
+            };
             expand_li(rd, imm)
         }
 
         // la rd, label — lui + addi (resolved at codegen time)
         "la" => {
             let rd = ops[0].clone();
-            let lbl = match &ops[1] { Label(s) => s.clone(), _ => return None };
+            let lbl = match &ops[1] {
+                Label(s) => s.clone(),
+                _ => return None,
+            };
             // Emit two placeholder instructions; codegen resolves the label.
             vec![
-                RealInstr::new("lui",  vec![rd.clone(), Label(format!("%hi({})", lbl))]),
+                RealInstr::new("lui", vec![rd.clone(), Label(format!("%hi({})", lbl))]),
                 RealInstr::new("addi", vec![rd.clone(), rd, Label(format!("%lo({})", lbl))]),
             ]
         }
 
-        "j"    => vec![RealInstr::new("jal",  vec![Reg(0), ops[0].clone()])],
-        "jr"   => vec![RealInstr::new("jalr", vec![Reg(0), ops[0].clone(), Imm(0)])],
-        "ret"  => vec![RealInstr::new("jalr", vec![Reg(0), Reg(1), Imm(0)])],
-        "call" => vec![RealInstr::new("jal",  vec![Reg(1), ops[0].clone()])],
+        "j" => vec![RealInstr::new("jal", vec![Reg(0), ops[0].clone()])],
+        "jr" => vec![RealInstr::new("jalr", vec![Reg(0), ops[0].clone(), Imm(0)])],
+        "ret" => vec![RealInstr::new("jalr", vec![Reg(0), Reg(1), Imm(0)])],
+        "call" => vec![RealInstr::new("jal", vec![Reg(1), ops[0].clone()])],
 
         "beqz" => {
             let (rs, lbl) = (ops[0].clone(), ops[1].clone());
@@ -170,13 +176,16 @@ pub fn expand(mnemonic: &str, ops: &[Operand]) -> Option<Vec<RealInstr>> {
 
 fn expand_li(rd: Operand, imm: i32) -> Vec<RealInstr> {
     if imm >= -2048 && imm <= 2047 {
-        vec![RealInstr::new("addi", vec![rd, Operand::Reg(0), Operand::Imm(imm)])]
+        vec![RealInstr::new(
+            "addi",
+            vec![rd, Operand::Reg(0), Operand::Imm(imm)],
+        )]
     } else {
         // upper20 rounded so that sign-extended lower12 adds correctly
         let upper = ((imm as u32).wrapping_add(0x800)) >> 12;
         let lower = imm - ((upper as i32) << 12);
         vec![
-            RealInstr::new("lui",  vec![rd.clone(), Operand::Imm(upper as i32)]),
+            RealInstr::new("lui", vec![rd.clone(), Operand::Imm(upper as i32)]),
             RealInstr::new("addi", vec![rd.clone(), rd, Operand::Imm(lower)]),
         ]
     }

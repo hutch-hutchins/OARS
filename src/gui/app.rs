@@ -4,12 +4,11 @@ use std::path::PathBuf;
 use egui::RichText;
 use egui_extras::{Column, TableBuilder};
 
-use crate::assembler::{codegen::{self, AssemblyOutput}, parser};
-use crate::hardware::{
-    fp_registers::FP_REG_NAMES,
-    memory::TEXT_BASE,
-    registers::REG_NAMES,
+use crate::assembler::{
+    codegen::{self, AssemblyOutput},
+    parser,
 };
+use crate::hardware::{fp_registers::FP_REG_NAMES, memory::TEXT_BASE, registers::REG_NAMES};
 use crate::simulator::{
     backstepper::Backstepper,
     engine::{self, CpuState, StepOutcome},
@@ -28,26 +27,29 @@ enum SimState {
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
-enum BottomTab { Console, TextSegment }
+enum BottomTab {
+    Console,
+    TextSegment,
+}
 
 // ─── App ─────────────────────────────────────────────────────────────────────
 
 pub struct OarsApp {
-    source:       String,
-    file_path:    Option<PathBuf>,
+    source: String,
+    file_path: Option<PathBuf>,
 
-    cpu:          Option<CpuState>,
-    asm_out:      Option<AssemblyOutput>,
-    sim_state:    SimState,
-    backstepper:  Backstepper,
+    cpu: Option<CpuState>,
+    asm_out: Option<AssemblyOutput>,
+    sim_state: SimState,
+    backstepper: Backstepper,
 
-    console_out:  String,
-    input_buf:    String,
-    input_queue:  VecDeque<String>,
+    console_out: String,
+    input_buf: String,
+    input_queue: VecDeque<String>,
 
     steps_per_frame: u32,
 
-    bottom_tab:   BottomTab,
+    bottom_tab: BottomTab,
 }
 
 const DEFAULT_SOURCE: &str = "\
@@ -64,24 +66,23 @@ impl OarsApp {
         cc.egui_ctx.set_visuals(egui::Visuals::dark());
 
         let mut style = (*cc.egui_ctx.style()).clone();
-        style.text_styles.insert(
-            egui::TextStyle::Monospace,
-            egui::FontId::monospace(13.0),
-        );
+        style
+            .text_styles
+            .insert(egui::TextStyle::Monospace, egui::FontId::monospace(13.0));
         cc.egui_ctx.set_style(style);
 
         Self {
-            source:          DEFAULT_SOURCE.to_owned(),
-            file_path:       None,
-            cpu:             None,
-            asm_out:         None,
-            sim_state:       SimState::Idle,
-            backstepper:     Backstepper::new(),
-            console_out:     String::new(),
-            input_buf:       String::new(),
-            input_queue:     VecDeque::new(),
+            source: DEFAULT_SOURCE.to_owned(),
+            file_path: None,
+            cpu: None,
+            asm_out: None,
+            sim_state: SimState::Idle,
+            backstepper: Backstepper::new(),
+            console_out: String::new(),
+            input_buf: String::new(),
+            input_queue: VecDeque::new(),
             steps_per_frame: 50_000,
-            bottom_tab:      BottomTab::Console,
+            bottom_tab: BottomTab::Console,
         }
     }
 
@@ -94,11 +95,13 @@ impl OarsApp {
         {
             match std::fs::read_to_string(&path) {
                 Ok(text) => {
-                    self.source    = text;
+                    self.source = text;
                     self.file_path = Some(path);
                     self.do_reset_state();
                 }
-                Err(e) => { self.sim_state = SimState::Error(e.to_string()); }
+                Err(e) => {
+                    self.sim_state = SimState::Error(e.to_string());
+                }
             }
         }
     }
@@ -125,15 +128,21 @@ impl OarsApp {
         self.do_reset_state();
         let stmts = match parser::parse(&self.source) {
             Ok(s) => s,
-            Err(e) => { self.sim_state = SimState::Error(e.to_string()); return false; }
+            Err(e) => {
+                self.sim_state = SimState::Error(e.to_string());
+                return false;
+            }
         };
         let mut cpu = CpuState::new(TEXT_BASE);
         match codegen::assemble(&stmts, &mut cpu.mem) {
-            Err(e) => { self.sim_state = SimState::Error(e.to_string()); false }
+            Err(e) => {
+                self.sim_state = SimState::Error(e.to_string());
+                false
+            }
             Ok(out) => {
-                cpu.pc        = out.entry;
-                self.cpu      = Some(cpu);
-                self.asm_out  = Some(out);
+                cpu.pc = out.entry;
+                self.cpu = Some(cpu);
+                self.asm_out = Some(out);
                 self.sim_state = SimState::Ready;
                 true
             }
@@ -159,7 +168,10 @@ impl OarsApp {
 
     fn do_backstep(&mut self) {
         if let Some(ref mut cpu) = self.cpu {
-            if self.backstepper.pop(&mut cpu.pc, &mut cpu.regs, &mut cpu.fp) {
+            if self
+                .backstepper
+                .pop(&mut cpu.pc, &mut cpu.regs, &mut cpu.fp)
+            {
                 self.sim_state = SimState::Paused;
             }
         }
@@ -175,9 +187,9 @@ impl OarsApp {
     }
 
     fn do_reset_state(&mut self) {
-        self.cpu         = None;
-        self.asm_out     = None;
-        self.sim_state   = SimState::Idle;
+        self.cpu = None;
+        self.asm_out = None;
+        self.sim_state = SimState::Idle;
         self.backstepper = Backstepper::new();
         self.console_out.clear();
         self.input_queue.clear();
@@ -186,7 +198,9 @@ impl OarsApp {
 
     fn pump_steps(&mut self, n: u32) {
         for _ in 0..n {
-            if !matches!(self.sim_state, SimState::Running) { return; }
+            if !matches!(self.sim_state, SimState::Running) {
+                return;
+            }
             if let Some(ref mut cpu) = self.cpu {
                 let outcome = engine::step_one(cpu, &mut self.console_out, &mut self.input_queue);
                 self.apply_outcome(outcome);
@@ -199,10 +213,16 @@ impl OarsApp {
 
     fn apply_outcome(&mut self, outcome: StepOutcome) {
         match outcome {
-            StepOutcome::Continue    => {}
-            StepOutcome::NeedInput   => { self.sim_state = SimState::WaitingInput; }
-            StepOutcome::Halted(c)   => { self.sim_state = SimState::Halted(c); }
-            StepOutcome::Faulted(m)  => { self.sim_state = SimState::Error(m); }
+            StepOutcome::Continue => {}
+            StepOutcome::NeedInput => {
+                self.sim_state = SimState::WaitingInput;
+            }
+            StepOutcome::Halted(c) => {
+                self.sim_state = SimState::Halted(c);
+            }
+            StepOutcome::Faulted(m) => {
+                self.sim_state = SimState::Error(m);
+            }
         }
         // Cap console output at 64 KiB
         const CAP: usize = 64 * 1024;
@@ -227,14 +247,14 @@ impl OarsApp {
 
     fn status_text(&self) -> (String, egui::Color32) {
         match &self.sim_state {
-            SimState::Idle          => ("Not assembled".into(),      egui::Color32::GRAY),
-            SimState::Ready         => ("Ready".into(),              egui::Color32::GREEN),
-            SimState::Running       => ("Running...".into(),         egui::Color32::YELLOW),
-            SimState::Paused        => ("Paused".into(),             egui::Color32::WHITE),
-            SimState::WaitingInput  => ("Waiting for input".into(),  egui::Color32::LIGHT_BLUE),
-            SimState::Halted(0)     => ("Halted (exit 0)".into(),    egui::Color32::GREEN),
-            SimState::Halted(n)     => (format!("Halted (exit {n})"), egui::Color32::YELLOW),
-            SimState::Error(m)      => (format!("Error: {m}"),       egui::Color32::RED),
+            SimState::Idle => ("Not assembled".into(), egui::Color32::GRAY),
+            SimState::Ready => ("Ready".into(), egui::Color32::GREEN),
+            SimState::Running => ("Running...".into(), egui::Color32::YELLOW),
+            SimState::Paused => ("Paused".into(), egui::Color32::WHITE),
+            SimState::WaitingInput => ("Waiting for input".into(), egui::Color32::LIGHT_BLUE),
+            SimState::Halted(0) => ("Halted (exit 0)".into(), egui::Color32::GREEN),
+            SimState::Halted(n) => (format!("Halted (exit {n})"), egui::Color32::YELLOW),
+            SimState::Error(m) => (format!("Error: {m}"), egui::Color32::RED),
         }
     }
 
@@ -242,29 +262,47 @@ impl OarsApp {
 
     fn show_toolbar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            if ui.button("Open").clicked() { self.do_open(); }
-            if ui.button("Save").clicked() { self.do_save(); }
+            if ui.button("Open").clicked() {
+                self.do_open();
+            }
+            if ui.button("Save").clicked() {
+                self.do_save();
+            }
 
             ui.separator();
 
             let assembled = self.cpu.is_some();
-            let running   = matches!(self.sim_state, SimState::Running);
-            let waiting   = matches!(self.sim_state, SimState::WaitingInput);
+            let running = matches!(self.sim_state, SimState::Running);
+            let waiting = matches!(self.sim_state, SimState::WaitingInput);
             let steppable = assembled && !running && !waiting;
-            let can_back  = assembled && !running && self.backstepper.len() > 0;
+            let can_back = assembled && !running && self.backstepper.len() > 0;
 
-            if ui.button("Assemble & Run").clicked() { self.do_assemble_and_run(); }
+            if ui.button("Assemble & Run").clicked() {
+                self.do_assemble_and_run();
+            }
 
-            if ui.add_enabled(steppable, egui::Button::new("Step")).clicked() {
+            if ui
+                .add_enabled(steppable, egui::Button::new("Step"))
+                .clicked()
+            {
                 self.do_step();
             }
-            if ui.add_enabled(can_back, egui::Button::new("Backstep")).clicked() {
+            if ui
+                .add_enabled(can_back, egui::Button::new("Backstep"))
+                .clicked()
+            {
                 self.do_backstep();
             }
-            if ui.add_enabled(running || waiting, egui::Button::new("Pause")).clicked() {
+            if ui
+                .add_enabled(running || waiting, egui::Button::new("Pause"))
+                .clicked()
+            {
                 self.do_pause();
             }
-            if ui.add_enabled(assembled, egui::Button::new("Reset")).clicked() {
+            if ui
+                .add_enabled(assembled, egui::Button::new("Reset"))
+                .clicked()
+            {
                 self.do_reset();
             }
 
@@ -282,7 +320,9 @@ impl OarsApp {
     }
 
     fn show_editor(&mut self, ui: &mut egui::Ui) {
-        let title = self.file_path.as_ref()
+        let title = self
+            .file_path
+            .as_ref()
             .and_then(|p| p.file_name())
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "untitled.s".to_owned());
@@ -340,7 +380,9 @@ impl OarsApp {
                             for i in 0..32usize {
                                 let val = if let Some(cpu) = &self.cpu {
                                     cpu.fp.read_f64(i)
-                                } else { 0.0 };
+                                } else {
+                                    0.0
+                                };
                                 ui.label(RichText::new(format!("f{i:02}")).monospace().weak());
                                 ui.label(RichText::new(FP_REG_NAMES[i]).monospace());
                                 ui.label(RichText::new(format!("{val:.6}")).monospace());
@@ -354,7 +396,11 @@ impl OarsApp {
     fn show_console(&mut self, ui: &mut egui::Ui) {
         let waiting = matches!(self.sim_state, SimState::WaitingInput);
 
-        let avail = if waiting { ui.available_height() - 40.0 } else { ui.available_height() };
+        let avail = if waiting {
+            ui.available_height() - 40.0
+        } else {
+            ui.available_height()
+        };
 
         egui::ScrollArea::vertical()
             .id_salt("console")
@@ -363,10 +409,8 @@ impl OarsApp {
             .stick_to_bottom(true)
             .show(ui, |ui| {
                 ui.add(
-                    egui::Label::new(
-                        RichText::new(&self.console_out).monospace().size(12.0)
-                    )
-                    .selectable(true),
+                    egui::Label::new(RichText::new(&self.console_out).monospace().size(12.0))
+                        .selectable(true),
                 );
             });
 
@@ -380,8 +424,8 @@ impl OarsApp {
                         .desired_width(f32::INFINITY - 60.0),
                 );
                 let send = ui.button("Send");
-                let enter_pressed = te.lost_focus()
-                    && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                let enter_pressed =
+                    te.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                 send.clicked() || enter_pressed
             });
             if resp.inner {
@@ -405,14 +449,20 @@ impl OarsApp {
                 .column(Column::remainder())
                 .header(20.0, |mut h| {
                     h.col(|_| {});
-                    h.col(|ui| { ui.strong("Address"); });
-                    h.col(|ui| { ui.strong("Machine Code"); });
-                    h.col(|ui| { ui.strong("Source"); });
+                    h.col(|ui| {
+                        ui.strong("Address");
+                    });
+                    h.col(|ui| {
+                        ui.strong("Machine Code");
+                    });
+                    h.col(|ui| {
+                        ui.strong("Source");
+                    });
                 })
                 .body(|body| {
                     body.rows(18.0, rows.len(), |mut row| {
-                        let i   = row.index();
-                        let tr  = &rows[i];
+                        let i = row.index();
+                        let tr = &rows[i];
                         let hot = current_pc == Some(tr.addr);
                         let src = source_lines
                             .get(tr.src_line.saturating_sub(1) as usize)
@@ -421,7 +471,9 @@ impl OarsApp {
                             .trim();
 
                         row.col(|ui| {
-                            if hot { ui.label("->"); }
+                            if hot {
+                                ui.label("->");
+                            }
                         });
                         row.col(|ui| {
                             let t = RichText::new(format!("{:#010x}", tr.addr)).monospace();
@@ -432,7 +484,9 @@ impl OarsApp {
                         });
                         row.col(|ui| {
                             let resp = ui.label(RichText::new(src).monospace());
-                            if hot { resp.scroll_to_me(None); }
+                            if hot {
+                                resp.scroll_to_me(None);
+                            }
                         });
                     });
                 });
@@ -454,20 +508,25 @@ impl eframe::App for OarsApp {
             ctx.request_repaint();
         }
 
-        egui::TopBottomPanel::top("toolbar")
-            .show(ctx, |ui| { self.show_toolbar(ui); });
+        egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
+            self.show_toolbar(ui);
+        });
 
         egui::TopBottomPanel::bottom("bottom_panel")
             .resizable(true)
             .default_height(200.0)
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    ui.selectable_value(&mut self.bottom_tab, BottomTab::Console,     "Console");
-                    ui.selectable_value(&mut self.bottom_tab, BottomTab::TextSegment, "Text Segment");
+                    ui.selectable_value(&mut self.bottom_tab, BottomTab::Console, "Console");
+                    ui.selectable_value(
+                        &mut self.bottom_tab,
+                        BottomTab::TextSegment,
+                        "Text Segment",
+                    );
                 });
                 ui.separator();
                 match self.bottom_tab {
-                    BottomTab::Console     => self.show_console(ui),
+                    BottomTab::Console => self.show_console(ui),
                     BottomTab::TextSegment => self.show_text_segment(ui),
                 }
             });
@@ -475,9 +534,12 @@ impl eframe::App for OarsApp {
         egui::SidePanel::right("registers")
             .resizable(true)
             .default_width(300.0)
-            .show(ctx, |ui| { self.show_registers(ui); });
+            .show(ctx, |ui| {
+                self.show_registers(ui);
+            });
 
-        egui::CentralPanel::default()
-            .show(ctx, |ui| { self.show_editor(ui); });
+        egui::CentralPanel::default().show(ctx, |ui| {
+            self.show_editor(ui);
+        });
     }
 }

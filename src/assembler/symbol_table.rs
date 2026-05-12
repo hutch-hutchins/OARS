@@ -6,7 +6,9 @@ pub struct SymbolTable {
 }
 
 impl SymbolTable {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     pub fn define(&mut self, name: &str, addr: u32) {
         self.labels.insert(name.to_owned(), addr);
