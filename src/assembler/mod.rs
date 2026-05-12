@@ -1,7 +1,5 @@
+pub mod codegen;
 pub mod lexer;
-// Phase 1:
-// pub mod parser;
-// pub mod directives;
-// pub mod macros;
-// pub mod symbol_table;
-// pub mod codegen;
+pub mod parser;
+pub mod symbol_table;
+// Phase 1+: macros
