@@ -57,7 +57,7 @@ jobs:
         run: cargo build
 
       - name: Run unit tests
-        run: cargo test --lib
+        run: cargo test --bin oars
 
-      # Integration (golden) tests are ignored until Phase 1 — run them explicitly:
+      # Integration (golden) tests are ignored by default — run them explicitly:
       #   cargo test --test golden -- --include-ignored
