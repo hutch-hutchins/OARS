@@ -55,6 +55,7 @@ pub enum DataItem {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum Statement {
     Label(String, Span),
     Instr(Instruction),
@@ -296,7 +297,7 @@ impl Parser {
 
             Token::CharLit(c) => {
                 self.advance();
-                return Ok(Operand::Imm(c as i32));
+                Ok(Operand::Imm(c as i32))
             }
 
             Token::Integer(v) => {

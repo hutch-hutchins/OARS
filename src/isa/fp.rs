@@ -94,6 +94,7 @@ pub fn step(
     Ok(pc.wrapping_add(4))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn exec_arith(
     word: u32,
     pc: u32,
@@ -288,12 +289,10 @@ fn fclass32(v: f32) -> u32 {
         } else {
             1 << 5
         }
+    } else if v < 0.0 {
+        1 << 1
     } else {
-        if v < 0.0 {
-            1 << 1
-        } else {
-            1 << 6
-        }
+        1 << 6
     }
 }
 
@@ -319,11 +318,9 @@ fn fclass64(v: f64) -> u32 {
         } else {
             1 << 5
         }
+    } else if v < 0.0 {
+        1 << 1
     } else {
-        if v < 0.0 {
-            1 << 1
-        } else {
-            1 << 6
-        }
+        1 << 6
     }
 }

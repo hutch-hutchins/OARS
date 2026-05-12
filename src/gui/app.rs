@@ -356,7 +356,7 @@ impl OarsApp {
                     .spacing([6.0, 1.0])
                     .striped(true)
                     .show(ui, |ui| {
-                        for i in 0..32usize {
+                        for (i, name) in REG_NAMES.iter().enumerate() {
                             let (val, changed) = if let Some(cpu) = &self.cpu {
                                 (cpu.regs.read(i), false)
                             } else {
@@ -364,7 +364,7 @@ impl OarsApp {
                             };
                             let _ = changed;
                             ui.label(RichText::new(format!("x{i:02}")).monospace().weak());
-                            ui.label(RichText::new(REG_NAMES[i]).monospace());
+                            ui.label(RichText::new(*name).monospace());
                             ui.label(RichText::new(format!("{val:#010x}")).monospace());
                             ui.end_row();
                         }
@@ -377,14 +377,14 @@ impl OarsApp {
                         .spacing([6.0, 1.0])
                         .striped(true)
                         .show(ui, |ui| {
-                            for i in 0..32usize {
+                            for (i, fp_name) in FP_REG_NAMES.iter().enumerate() {
                                 let val = if let Some(cpu) = &self.cpu {
                                     cpu.fp.read_f64(i)
                                 } else {
                                     0.0
                                 };
                                 ui.label(RichText::new(format!("f{i:02}")).monospace().weak());
-                                ui.label(RichText::new(FP_REG_NAMES[i]).monospace());
+                                ui.label(RichText::new(*fp_name).monospace());
                                 ui.label(RichText::new(format!("{val:.6}")).monospace());
                                 ui.end_row();
                             }

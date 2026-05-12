@@ -14,6 +14,7 @@ pub struct TextRow {
 
 /// Output of assembly: memory image + symbol table + entry PC + text-segment map.
 pub struct AssemblyOutput {
+    #[allow(dead_code)]
     pub symbols: SymbolTable,
     pub entry: u32,
     pub text_rows: Vec<TextRow>,

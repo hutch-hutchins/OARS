@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 /// Well-known CSR addresses used by OARS.
+#[allow(dead_code)]
 pub mod addr {
     pub const FFLAGS: u32 = 0x001; // FP accrued exceptions
     pub const FRM: u32 = 0x002; // FP rounding mode

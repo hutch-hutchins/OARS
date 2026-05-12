@@ -175,7 +175,7 @@ pub fn expand(mnemonic: &str, ops: &[Operand]) -> Option<Vec<RealInstr>> {
 }
 
 fn expand_li(rd: Operand, imm: i32) -> Vec<RealInstr> {
-    if imm >= -2048 && imm <= 2047 {
+    if (-2048..=2047).contains(&imm) {
         vec![RealInstr::new(
             "addi",
             vec![rd, Operand::Reg(0), Operand::Imm(imm)],

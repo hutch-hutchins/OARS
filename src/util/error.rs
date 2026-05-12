@@ -16,6 +16,7 @@ impl std::fmt::Display for SourceLoc {
 
 /// Top-level simulator error type.
 #[derive(Debug, Error)]
+#[allow(dead_code)]
 pub enum OarsError {
     #[error("{loc}: lex error: {msg}")]
     Lex { loc: SourceLoc, msg: String },

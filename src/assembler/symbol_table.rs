@@ -18,6 +18,7 @@ impl SymbolTable {
         self.labels.get(name).copied()
     }
 
+    #[allow(dead_code)]
     pub fn all(&self) -> &HashMap<String, u32> {
         &self.labels
     }

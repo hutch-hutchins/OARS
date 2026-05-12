@@ -202,7 +202,7 @@ fn exec_csr(
     let f3 = f::funct3(word);
     let rd = f::rd(word);
     let rs1 = f::rs1(word);
-    let csr_addr = (word >> 20) as u32; // bits 31:20
+    let csr_addr = word >> 20; // bits 31:20
     let uimm = rs1 as u32; // for csrrwi/csrrsi/csrrci, rs1 field = uimm
 
     match f3 {
