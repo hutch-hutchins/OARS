@@ -5,18 +5,26 @@ use crate::isa::formats as f;
 use crate::isa::{pseudo, rv32m};
 use anyhow::{anyhow, Result};
 
-/// Output of assembly: memory image + symbol table + entry PC.
+/// One row in the text-segment view: assembled address, machine word, source line.
+pub struct TextRow {
+    pub addr:     u32,
+    pub word:     u32,
+    pub src_line: u32,  // 1-based line number in the source file
+}
+
+/// Output of assembly: memory image + symbol table + entry PC + text-segment map.
 pub struct AssemblyOutput {
-    pub symbols: SymbolTable,
-    pub entry: u32,
+    pub symbols:   SymbolTable,
+    pub entry:     u32,
+    pub text_rows: Vec<TextRow>,
 }
 
 /// Assemble a list of `Statement`s into `mem`.
 /// Two-pass: pass 1 collects symbol addresses, pass 2 encodes instructions.
 pub fn assemble(stmts: &[Statement], mem: &mut Memory) -> Result<AssemblyOutput> {
     let symbols = pass1(stmts);
-    let entry = pass2(stmts, &symbols, mem)?;
-    Ok(AssemblyOutput { symbols, entry })
+    let (entry, text_rows) = pass2(stmts, &symbols, mem)?;
+    Ok(AssemblyOutput { symbols, entry, text_rows })
 }
 
 // ─── Pass 1: collect labels ───────────────────────────────────────────────────
@@ -74,11 +82,12 @@ fn data_item_size(item: &DataItem) -> u32 {
 
 // ─── Pass 2: encode instructions + data ──────────────────────────────────────
 
-fn pass2(stmts: &[Statement], sym: &SymbolTable, mem: &mut Memory) -> Result<u32> {
+fn pass2(stmts: &[Statement], sym: &SymbolTable, mem: &mut Memory) -> Result<(u32, Vec<TextRow>)> {
     let mut text_pc = TEXT_BASE;
     let mut data_pc = DATA_BASE;
     let mut seg = Seg::Text;
-    let mut entry = sym.resolve("main").or_else(|| sym.resolve("_start")).unwrap_or(TEXT_BASE);
+    let entry = sym.resolve("main").or_else(|| sym.resolve("_start")).unwrap_or(TEXT_BASE);
+    let mut text_rows: Vec<TextRow> = Vec::new();
 
     for stmt in stmts {
         match stmt {
@@ -86,14 +95,18 @@ fn pass2(stmts: &[Statement], sym: &SymbolTable, mem: &mut Memory) -> Result<u32
             Statement::Label(_,  _) => {}
             Statement::Instr(instr) => {
                 let words = encode_instr(instr, text_pc, sym)?;
-                for w in &words { mem.store_word(text_pc, *w); text_pc += 4; }
+                for w in &words {
+                    text_rows.push(TextRow { addr: text_pc, word: *w, src_line: instr.span.line });
+                    mem.store_word(text_pc, *w);
+                    text_pc += 4;
+                }
             }
             Statement::Data(item, _) => { data_pc = emit_data(item, data_pc, mem); }
             Statement::Globl(_) => {}
         }
     }
-    let _ = seg; // suppress unused warning
-    Ok(entry)
+    let _ = seg;
+    Ok((entry, text_rows))
 }
 
 fn emit_data(item: &DataItem, addr: u32, mem: &mut Memory) -> u32 {

@@ -1,5 +1,6 @@
 use crate::hardware::{fp_registers::FpRegisters, memory::Memory, registers::RegisterFile};
 use crate::util::error::OarsError;
+use std::collections::VecDeque;
 use std::io::{BufRead, Write};
 
 /// Dispatch a RISC-V ECALL based on a7 (syscall number).
@@ -122,4 +123,82 @@ pub fn dispatch(
     }
 
     Ok(true)
+}
+
+// ─── GUI variant ─────────────────────────────────────────────────────────────
+
+pub enum GuiSyscallOutcome { Continue, Halt, NeedInput }
+
+/// Dispatch an ECALL from the GUI run loop.
+/// Output is appended to `console`. Input is consumed from `input_queue`;
+/// if the queue is empty when a read syscall fires, returns `NeedInput`.
+pub fn dispatch_gui(
+    regs:        &mut RegisterFile,
+    fp:          &mut FpRegisters,
+    mem:         &mut Memory,
+    _pc:         u32,
+    console:     &mut String,
+    input_queue: &mut VecDeque<String>,
+) -> Result<GuiSyscallOutcome, OarsError> {
+    let num = regs.read(17);
+
+    match num {
+        1 => {
+            let v = regs.read(10) as i32;
+            console.push_str(&v.to_string());
+        }
+        2 => { console.push_str(&fp.read_f32(10).to_string()); }
+        3 => { console.push_str(&fp.read_f64(10).to_string()); }
+        4 => {
+            let addr = regs.read(10);
+            console.push_str(&mem.read_cstring(addr));
+        }
+        5 => {
+            if input_queue.is_empty() { return Ok(GuiSyscallOutcome::NeedInput); }
+            let line = input_queue.pop_front().unwrap();
+            regs.write(10, line.trim().parse::<i32>().unwrap_or(0) as u32);
+        }
+        6 => {
+            if input_queue.is_empty() { return Ok(GuiSyscallOutcome::NeedInput); }
+            let line = input_queue.pop_front().unwrap();
+            fp.write_f32(10, line.trim().parse::<f32>().unwrap_or(0.0));
+        }
+        7 => {
+            if input_queue.is_empty() { return Ok(GuiSyscallOutcome::NeedInput); }
+            let line = input_queue.pop_front().unwrap();
+            fp.write_f64(10, line.trim().parse::<f64>().unwrap_or(0.0));
+        }
+        8 => {
+            if input_queue.is_empty() { return Ok(GuiSyscallOutcome::NeedInput); }
+            let line = input_queue.pop_front().unwrap();
+            let addr = regs.read(10);
+            let max  = regs.read(11) as usize;
+            let bytes = line.as_bytes();
+            let n = bytes.len().min(max.saturating_sub(1));
+            mem.write_bytes(addr, &bytes[..n]);
+            mem.store_byte(addr + n as u32, 0);
+        }
+        9 => {
+            let size = regs.read(10);
+            let ptr = mem.sbrk(size)?;
+            regs.write(10, ptr);
+        }
+        10 | 17 => return Ok(GuiSyscallOutcome::Halt),
+        11 => {
+            let c = (regs.read(10) & 0xFF) as u8;
+            console.push(c as char);
+        }
+        12 => {
+            if input_queue.is_empty() { return Ok(GuiSyscallOutcome::NeedInput); }
+            let line = input_queue.pop_front().unwrap();
+            let c = line.chars().next().unwrap_or('\0') as u32;
+            regs.write(10, c);
+        }
+        _ => return Err(OarsError::Syscall {
+            number: num,
+            msg: format!("unknown syscall {num}"),
+        }),
+    }
+
+    Ok(GuiSyscallOutcome::Continue)
 }

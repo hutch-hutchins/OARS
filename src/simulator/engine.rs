@@ -6,9 +6,10 @@ use crate::hardware::{
     registers::RegisterFile,
 };
 use crate::isa::{fp, formats as f, rv32i::{step as rv32i_step, StepResult}, rv32m};
-use crate::simulator::syscalls;
+use crate::simulator::syscalls::{self, GuiSyscallOutcome};
 use anyhow::Result;
 use serde::Serialize;
+use std::collections::VecDeque;
 use std::io::{BufRead, Write};
 
 pub struct CpuState {
@@ -40,6 +41,82 @@ pub struct Telemetry {
     pub instructions: u64,
     pub exit_code: i32,
 }
+
+// ─── Single-step interface (for the GUI) ─────────────────────────────────────
+
+pub enum StepOutcome {
+    Continue,
+    NeedInput,
+    Halted(i32),
+    Faulted(String),
+}
+
+/// Execute one instruction.  Console output is appended to `console`;
+/// stdin is drawn from `input_queue` (returns NeedInput if the queue is empty
+/// when a read syscall fires).
+pub fn step_one(
+    cpu:         &mut CpuState,
+    console:     &mut String,
+    input_queue: &mut VecDeque<String>,
+) -> StepOutcome {
+    let word = cpu.mem.load_word(cpu.pc);
+    let opc  = f::opcode(word);
+
+    let raw = match opc {
+        0x07 | 0x27 | 0x43 | 0x47 | 0x4B | 0x4F | 0x53 =>
+            fp::step(word, cpu.pc, &mut cpu.regs, &mut cpu.fp, &mut cpu.mem)
+                .map(|next| (next, false, false)),
+
+        0x33 if f::funct7(word) == 0x01 =>
+            rv32m::step(word, cpu.pc, &mut cpu.regs)
+                .map(|next| (next, false, false)),
+
+        0x73 if f::funct3(word) != 0 =>
+            exec_csr(word, cpu.pc, &mut cpu.regs, &mut cpu.csr)
+                .map(|()| (cpu.pc.wrapping_add(4), false, false)),
+
+        _ => rv32i_step(word, cpu.pc, &mut cpu.regs, &mut cpu.mem)
+            .map(|sr| match sr {
+                StepResult::Next(pc) => (pc, false, false),
+                StepResult::Ecall    => (0,  true,  false),
+                StepResult::Ebreak   => (0,  false, true),
+            }),
+    };
+
+    match raw {
+        Err(e) => StepOutcome::Faulted(e.to_string()),
+
+        Ok((_, _, true)) => StepOutcome::Halted(0),  // ebreak
+
+        Ok((_, true, _)) => {
+            // ecall — dispatch through GUI path
+            match syscalls::dispatch_gui(
+                &mut cpu.regs, &mut cpu.fp, &mut cpu.mem,
+                cpu.pc, console, input_queue,
+            ) {
+                Err(e) => StepOutcome::Faulted(e.to_string()),
+                Ok(GuiSyscallOutcome::NeedInput) => StepOutcome::NeedInput,
+                Ok(GuiSyscallOutcome::Halt) =>
+                    StepOutcome::Halted(cpu.regs.read(10) as i32),
+                Ok(GuiSyscallOutcome::Continue) => {
+                    cpu.pc = cpu.pc.wrapping_add(4);
+                    cpu.instret += 1;
+                    cpu.csr.tick(cpu.instret);
+                    StepOutcome::Continue
+                }
+            }
+        }
+
+        Ok((next_pc, false, false)) => {
+            cpu.pc = next_pc;
+            cpu.instret += 1;
+            cpu.csr.tick(cpu.instret);
+            StepOutcome::Continue
+        }
+    }
+}
+
+// ─── Headless batch runner ────────────────────────────────────────────────────
 
 pub fn run(
     cpu: &mut CpuState,
