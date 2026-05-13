@@ -101,6 +101,9 @@ Ready-to-run examples in [`examples/asm/`](examples/asm/) cover the advanced ins
 | [`dot_product.s`](examples/asm/dot_product.s) | RV32F — `fmadd.s`, `flw` | Dot product using fused multiply-add (FMA) |
 | [`newton_sqrt.s`](examples/asm/newton_sqrt.s) | RV32D — `fld`, `fadd.d`, `fmul.d`, `fdiv.d`, `fabs.d`, `fsqrt.d` | Newton-Raphson sqrt(2) compared to hardware `fsqrt.d` |
 | [`csr_benchmark.s`](examples/asm/csr_benchmark.s) | Zicsr — `csrr instret`; RV32M — `mul` | Instruction-count benchmarking: loop vs. Gauss formula |
+| [`stack_frame.s`](examples/asm/stack_frame.s) | ABI — `call`/`ret`, callee-saved regs, stack frame | `sum_of_squares(5) = 55` via a fully ABI-compliant subroutine |
+| [`factorial.s`](examples/asm/factorial.s) | ABI — recursive calls, `sw`/`lw` on stack | Recursive `10! = 3628800`; demonstrates saving `ra` and `a0` across calls |
+| [`heap_alloc.s`](examples/asm/heap_alloc.s) | Syscall 9 — `sbrk` | Dynamic heap allocation: fill and print an 8-element array |
 
 Open any file in OARS, click **Assemble**, then **Run** to see the output in the Console panel.
 
@@ -175,7 +178,21 @@ The binary will be at `target/release/oars` (or `oars.exe` on Windows).
 
 ## Roadmap
 
-### v0.3.0 — Current Release ✓
+### v0.4.0 — Current Release ✓
+
+#### Export
+
+- [x] `File → Export Flat Binary…` — saves raw text-segment bytes (load at `TEXT_BASE`)
+- [x] `File → Export ELF…` — minimal ELF32 RISC-V executable with PT_LOAD segments (text r-x, data rw-)
+
+#### Examples & Tests
+
+- [x] 3 new ABI examples: `stack_frame.s` (subroutine with saved regs), `factorial.s` (recursive), `heap_alloc.s` (sbrk)
+- [x] `.asciz` directive support (alias for `.asciiz` / `.string`)
+- [x] `ret` / `jr` pseudo-op fix: now correctly emits `jalr rd, 0(rs1)`
+- [x] Integration test suite grown to 13 tests, all passing
+
+### v0.3.0 — Prior Release ✓
 
 #### ISA & Core
 
@@ -211,7 +228,7 @@ The binary will be at `target/release/oars` (or `oars.exe` on Windows).
 - [x] File open / save dialog (`.s` / `.asm` filter)
 - [x] GitHub Actions release builds (Windows x86-64, macOS ARM, Linux x86-64)
 
-#### Examples & Tests
+#### v0.3.0 Examples & Tests
 
 - [x] 11 ready-to-run example programs in `examples/asm/` covering RV32M, RV32F, RV32D, Zicsr, and interactive console I/O
 - [x] Integration test suite — 10 tests, all passing

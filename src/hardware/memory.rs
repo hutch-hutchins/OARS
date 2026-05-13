@@ -97,6 +97,11 @@ impl Memory {
         }
     }
 
+    /// Read a contiguous byte range from memory.
+    pub fn read_range(&self, start: u32, len: usize) -> Vec<u8> {
+        (0..len).map(|i| self.load_byte(start + i as u32)).collect()
+    }
+
     /// Read a null-terminated string from memory.
     pub fn read_cstring(&self, addr: u32) -> String {
         let mut s = Vec::new();

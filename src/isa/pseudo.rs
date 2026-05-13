@@ -96,8 +96,14 @@ pub fn expand(mnemonic: &str, ops: &[Operand]) -> Option<Vec<RealInstr>> {
         }
 
         "j" => vec![RealInstr::new("jal", vec![Reg(0), ops[0].clone()])],
-        "jr" => vec![RealInstr::new("jalr", vec![Reg(0), ops[0].clone(), Imm(0)])],
-        "ret" => vec![RealInstr::new("jalr", vec![Reg(0), Reg(1), Imm(0)])],
+        "jr" => {
+            let base = match &ops[0] {
+                Reg(r) => MemOff(0, *r),
+                o => o.clone(),
+            };
+            vec![RealInstr::new("jalr", vec![Reg(0), base])]
+        }
+        "ret" => vec![RealInstr::new("jalr", vec![Reg(0), MemOff(0, 1)])],
         "call" => vec![RealInstr::new("jal", vec![Reg(1), ops[0].clone()])],
 
         "beqz" => {

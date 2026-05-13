@@ -229,7 +229,7 @@ impl Parser {
                 Statement::Data(DataItem::Double(v), span.clone())
             }
 
-            "string" | "asciiz" => {
+            "string" | "asciiz" | "asciz" => {
                 let s = self.expect_string()?;
                 self.expect_newline_or_eof()?;
                 Statement::Data(DataItem::String(s), span.clone())

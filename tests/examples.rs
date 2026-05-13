@@ -167,3 +167,38 @@ fn example_bubble_sort() {
         "expected sorted sequence: {out:?}"
     );
 }
+
+// ── Stack frames: sum_of_squares(5) = 55 ─────────────────────────────────────
+
+#[test]
+fn example_stack_frame() {
+    let (out, code) = run_example("stack_frame.s");
+    assert_eq!(code, 0);
+    assert!(
+        out.contains("sum_of_squares(5) = "),
+        "missing label: {out:?}"
+    );
+    assert!(out.contains("55"), "expected 55: {out:?}");
+}
+
+// ── Recursive factorial: 10! = 3628800 ───────────────────────────────────────
+
+#[test]
+fn example_factorial() {
+    let (out, code) = run_example("factorial.s");
+    assert_eq!(code, 0);
+    assert!(out.contains("10! = "), "missing label: {out:?}");
+    assert!(out.contains("3628800"), "expected 3628800: {out:?}");
+}
+
+// ── Heap allocation via sbrk: prints "1 2 3 4 5 6 7 8" ───────────────────────
+
+#[test]
+fn example_heap_alloc() {
+    let (out, code) = run_example("heap_alloc.s");
+    assert_eq!(code, 0);
+    assert!(
+        out.contains("1 2 3 4 5 6 7 8"),
+        "expected heap array: {out:?}"
+    );
+}

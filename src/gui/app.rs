@@ -6,7 +6,7 @@ use egui_extras::{Column, TableBuilder};
 
 use crate::assembler::{
     codegen::{self, AssemblyOutput},
-    parser,
+    export, parser,
 };
 use crate::hardware::{
     csr::addr as csr_addr,
@@ -210,6 +210,36 @@ impl Tab {
                 self.sim_state = SimState::Error(e.to_string(), None);
             } else {
                 self.file_path = Some(path);
+            }
+        }
+    }
+
+    fn do_export_binary(&mut self) {
+        let Some(ref out) = self.asm_out else { return };
+        let Some(ref cpu) = self.cpu else { return };
+        let bytes = export::flat_binary(&cpu.mem, out.text_end);
+        if let Some(path) = rfd::FileDialog::new()
+            .add_filter("Binary", &["bin"])
+            .set_file_name("program.bin")
+            .save_file()
+        {
+            if let Err(e) = std::fs::write(&path, &bytes) {
+                self.sim_state = SimState::Error(e.to_string(), None);
+            }
+        }
+    }
+
+    fn do_export_elf(&mut self) {
+        let Some(ref out) = self.asm_out else { return };
+        let Some(ref cpu) = self.cpu else { return };
+        let bytes = export::elf32(&cpu.mem, out.entry, out.text_end, out.data_end);
+        if let Some(path) = rfd::FileDialog::new()
+            .add_filter("ELF", &["elf"])
+            .set_file_name("program.elf")
+            .save_file()
+        {
+            if let Err(e) = std::fs::write(&path, &bytes) {
+                self.sim_state = SimState::Error(e.to_string(), None);
             }
         }
     }
@@ -2179,6 +2209,22 @@ impl eframe::App for OarsApp {
                     }
                     if ui.button("Save").clicked() {
                         self.tabs[self.active].do_save();
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                    let assembled = self.tabs[self.active].asm_out.is_some();
+                    if ui
+                        .add_enabled(assembled, egui::Button::new("Export Flat Binary…"))
+                        .clicked()
+                    {
+                        self.tabs[self.active].do_export_binary();
+                        ui.close_menu();
+                    }
+                    if ui
+                        .add_enabled(assembled, egui::Button::new("Export ELF…"))
+                        .clicked()
+                    {
+                        self.tabs[self.active].do_export_elf();
                         ui.close_menu();
                     }
                     ui.separator();

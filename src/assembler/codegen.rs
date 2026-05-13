@@ -18,6 +18,10 @@ pub struct AssemblyOutput {
     #[allow(dead_code)]
     pub symbols: SymbolTable,
     pub entry: u32,
+    /// One past the last byte written into the text segment.
+    pub text_end: u32,
+    /// One past the last byte written into the data segment.
+    pub data_end: u32,
     pub text_rows: Vec<TextRow>,
     /// Reverse map: address → labels defined at that address (for display).
     pub addr_to_labels: HashMap<u32, Vec<String>>,
@@ -28,10 +32,12 @@ pub struct AssemblyOutput {
 pub fn assemble(stmts: &[Statement], mem: &mut Memory) -> Result<AssemblyOutput> {
     let symbols = pass1(stmts);
     let addr_to_labels = build_addr_to_labels(&symbols);
-    let (entry, text_rows) = pass2(stmts, &symbols, mem)?;
+    let (entry, text_end, data_end, text_rows) = pass2(stmts, &symbols, mem)?;
     Ok(AssemblyOutput {
         symbols,
         entry,
+        text_end,
+        data_end,
         text_rows,
         addr_to_labels,
     })
@@ -113,7 +119,11 @@ fn data_item_size(item: &DataItem) -> u32 {
 
 // ─── Pass 2: encode instructions + data ──────────────────────────────────────
 
-fn pass2(stmts: &[Statement], sym: &SymbolTable, mem: &mut Memory) -> Result<(u32, Vec<TextRow>)> {
+fn pass2(
+    stmts: &[Statement],
+    sym: &SymbolTable,
+    mem: &mut Memory,
+) -> Result<(u32, u32, u32, Vec<TextRow>)> {
     let mut text_pc = TEXT_BASE;
     let mut data_pc = DATA_BASE;
     let mut seg = Seg::Text;
@@ -146,7 +156,7 @@ fn pass2(stmts: &[Statement], sym: &SymbolTable, mem: &mut Memory) -> Result<(u3
         }
     }
     let _ = seg;
-    Ok((entry, text_rows))
+    Ok((entry, text_pc, data_pc, text_rows))
 }
 
 fn emit_data(item: &DataItem, addr: u32, mem: &mut Memory) -> u32 {
