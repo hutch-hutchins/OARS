@@ -52,19 +52,16 @@ fn golden(name: &str) -> String {
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[test]
-#[ignore = "Phase 1 not implemented yet"]
 fn hello_world() {
     assert_eq!(run_program("hello.s"), golden("hello.txt"));
 }
 
 #[test]
-#[ignore = "Phase 1 not implemented yet"]
 fn fibonacci() {
     assert_eq!(run_program("fibonacci.s"), golden("fibonacci.txt"));
 }
 
 #[test]
-#[ignore = "Phase 1 not implemented yet"]
 fn bubble_sort() {
     assert_eq!(run_program("bubble_sort.s"), golden("bubble_sort.txt"));
 }

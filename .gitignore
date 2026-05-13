@@ -4,8 +4,7 @@
 # Reference clones (large, not part of OARS source)
 /reference/
 
-# Golden test outputs generated locally
-/tests/golden/
+# Local test scratch output
 /tests/out/
 
 # Distribution artifacts
