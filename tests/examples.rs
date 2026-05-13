@@ -1,0 +1,127 @@
+/// Integration tests for the example programs in examples/asm/.
+///
+/// Each test assembles a .s file through the OARS assembler, runs it with the
+/// simulator engine, and checks the expected output.
+use oars::assembler::{codegen, parser};
+use oars::cli::RunOpts;
+use oars::hardware::memory::TEXT_BASE;
+use oars::simulator::engine::{self, CpuState};
+use std::io::Cursor;
+use std::path::Path;
+
+fn run_example(name: &str) -> (String, i32) {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("examples/asm")
+        .join(name);
+    let src = std::fs::read_to_string(&path).unwrap_or_else(|_| panic!("cannot read {name}"));
+    let stmts = parser::parse(&src).unwrap_or_else(|e| panic!("parse error in {name}: {e}"));
+    let mut cpu = CpuState::new(TEXT_BASE);
+    let asm_out = codegen::assemble(&stmts, &mut cpu.mem)
+        .unwrap_or_else(|e| panic!("assemble error in {name}: {e}"));
+    cpu.pc = asm_out.entry;
+    let mut stdout = Vec::<u8>::new();
+    let mut stdin = Cursor::new(b"");
+    let opts = RunOpts::default();
+    let telem = engine::run(&mut cpu, &opts, &mut stdout, &mut stdin)
+        .unwrap_or_else(|e| panic!("runtime error in {name}: {e}"));
+    (String::from_utf8(stdout).unwrap(), telem.exit_code)
+}
+
+// ── RV32M: rem — Euclidean GCD ────────────────────────────────────────────────
+
+#[test]
+fn example_gcd() {
+    let (out, code) = run_example("gcd.s");
+    assert_eq!(code, 0);
+    assert!(out.contains("GCD(48, 18) = "), "missing header: {out:?}");
+    assert!(out.contains("= 6"), "expected GCD = 6, got: {out:?}");
+}
+
+// ── RV32M: mul / mulh / mulhu — exponentiation by squaring ───────────────────
+
+#[test]
+fn example_integer_power() {
+    let (out, code) = run_example("integer_power.s");
+    assert_eq!(code, 0);
+    assert!(out.contains("2^10 = 1024"), "wrong power result: {out:?}");
+    assert!(
+        out.contains("upper half = 0"),
+        "wrong mulhu result: {out:?}"
+    );
+}
+
+// ── RV32F: fmul.s / fsub.s / fsqrt.s / fdiv.s — quadratic formula ────────────
+
+#[test]
+fn example_quadratic() {
+    let (out, code) = run_example("quadratic.s");
+    assert_eq!(code, 0);
+    assert!(
+        !out.contains("No real roots"),
+        "discriminant should be positive: {out:?}"
+    );
+    // Roots of x^2 - 5x + 6 = 0  are 3.0 and 2.0.
+    // Rust f32 Display prints 3.0 as "3" and 2.0 as "2".
+    assert!(out.contains("x1 = 3"), "expected x1 = 3, got: {out:?}");
+    assert!(out.contains("x2 = 2"), "expected x2 = 2, got: {out:?}");
+}
+
+// ── RV32F: fmadd.s — dot product with fused multiply-add ─────────────────────
+
+#[test]
+fn example_dot_product() {
+    let (out, code) = run_example("dot_product.s");
+    assert_eq!(code, 0);
+    // [1,2,3,4] · [4,3,2,1] = 4+6+6+4 = 20.  Rust f32 Display: "20"
+    assert!(
+        out.contains("u · v = 20"),
+        "expected dot product 20, got: {out:?}"
+    );
+}
+
+// ── Zicsr: csrr instret — instruction-count benchmarking ─────────────────────
+
+#[test]
+fn example_csr_benchmark() {
+    let (out, code) = run_example("csr_benchmark.s");
+    assert_eq!(code, 0);
+    // Both the loop and the Gauss formula compute sum 1..=100 = 5050.
+    assert!(out.contains("Loop sum"), "missing loop section: {out:?}");
+    assert!(
+        out.contains("Formula sum"),
+        "missing formula section: {out:?}"
+    );
+    let count_5050 = out.matches("5050").count();
+    assert!(
+        count_5050 >= 2,
+        "expected 5050 from both methods, found {count_5050} in: {out:?}"
+    );
+    // The loop instruction count should be much larger than the formula's.
+    // We don't check the exact number but verify the program ran both paths.
+    assert!(
+        out.contains("loop instrs:"),
+        "missing loop instr count: {out:?}"
+    );
+    assert!(
+        out.contains("formula instrs:"),
+        "missing formula instr count: {out:?}"
+    );
+}
+
+// ── RV32D: fmul.d / fdiv.d / fabs.d / fsqrt.d — Newton-Raphson sqrt ──────────
+
+#[test]
+fn example_newton_sqrt() {
+    let (out, code) = run_example("newton_sqrt.s");
+    assert_eq!(code, 0);
+    // Newton-Raphson converges to sqrt(2); check first 7 digits are correct.
+    assert!(
+        out.contains("Newton-Raphson sqrt(2) = 1.41421"),
+        "NR sqrt wrong: {out:?}"
+    );
+    // Hardware fsqrt.d gives the correctly-rounded IEEE 754 result.
+    assert!(
+        out.contains("Hardware   fsqrt.d(2) = 1.4142135623730951"),
+        "hardware sqrt wrong: {out:?}"
+    );
+}

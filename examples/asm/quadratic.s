@@ -105,6 +105,7 @@ main:
     li   a7, 4
     ecall
 
+    li   a0, 0
     li   a7, 10
     ecall
 
@@ -112,5 +113,6 @@ no_real_roots:
     la   a0, msg_neg
     li   a7, 4
     ecall
+    li   a0, 0
     li   a7, 10
     ecall

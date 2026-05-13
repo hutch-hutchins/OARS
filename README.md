@@ -1,5 +1,7 @@
 # OARS — Oxide Assembler and Runtime Simulator
 
+![OARS](assets/banner.png)
+
 > OARS is what RARS would be if it were rewritten today — a single double-clickable binary for Windows, macOS, and Linux. No Java, no installer.
 
 OARS follows the MARS → RARS lineage, keeping the same educational mission and RARS-compatible memory layout so existing `.s` files run without modification.
@@ -87,6 +89,21 @@ oars program.s --start-at-main        # begin at label `main` instead of first i
 oars program.s --telemetry            # emit instruction count + exit code as JSON
 ```
 
+## Example Programs
+
+Ready-to-run examples in [`examples/asm/`](examples/asm/) cover the advanced instruction extensions:
+
+| File | Extensions used | What it does |
+| --- | --- | --- |
+| [`gcd.s`](examples/asm/gcd.s) | RV32M — `rem` | Euclidean GCD algorithm: `gcd(48, 18) = 6` |
+| [`integer_power.s`](examples/asm/integer_power.s) | RV32M — `mul`, `mulh`, `mulhu` | Exponentiation by squaring; `mulhu` overflow detection |
+| [`quadratic.s`](examples/asm/quadratic.s) | RV32F — `flw`, `fmul.s`, `fsub.s`, `fsqrt.s`, `fdiv.s`, `fneg.s`, `flt.s`, `fcvt.s.w` | Quadratic formula solver: roots of x²−5x+6=0 |
+| [`dot_product.s`](examples/asm/dot_product.s) | RV32F — `fmadd.s`, `flw` | Dot product using fused multiply-add (FMA) |
+| [`newton_sqrt.s`](examples/asm/newton_sqrt.s) | RV32D — `fld`, `fadd.d`, `fmul.d`, `fdiv.d`, `fabs.d`, `fsqrt.d` | Newton-Raphson sqrt(2) compared to hardware `fsqrt.d` |
+| [`csr_benchmark.s`](examples/asm/csr_benchmark.s) | Zicsr — `csrr instret`; RV32M — `mul` | Instruction-count benchmarking: loop vs. Gauss formula |
+
+Open any file in OARS, click **Assemble**, then **Run** to see the output in the Console panel.
+
 ## Your First Program
 
 ```asm
@@ -133,7 +150,7 @@ main:
 | **RV32D** | Double-precision FP — `fld`, `fsd`, arithmetic, conversions, comparisons |
 | **Zicsr** | `csrrw`, `csrrs`, `csrrc` + immediate variants |
 
-Pseudo-instructions: `li`, `la`, `mv`, `not`, `neg`, `nop`, `j`, `jr`, `ret`, `call`, `beqz`, `bnez`, `blez`, `bgez`, `bltz`, `bgtz`, `bgt`, `ble`, `bgtu`, `bleu`, `seqz`, `snez`, `sltz`, `sgtz`.
+Pseudo-instructions: `li`, `la`, `mv`, `not`, `neg`, `nop`, `j`, `jr`, `ret`, `call`, `beqz`, `bnez`, `blez`, `bgez`, `bltz`, `bgtz`, `bgt`, `ble`, `bgtu`, `bleu`, `seqz`, `snez`, `sltz`, `sgtz`, `fmv.s`, `fmv.d`, `fabs.s`, `fabs.d`, `fneg.s`, `fneg.d`, `csrr`, `csrw`, `csrs`, `csrc`, `csrwi`, `csrsi`, `csrci`.
 
 ## Memory Layout
 
@@ -194,12 +211,12 @@ Items are grouped by planned release. Checked items are complete and shipped.
 - [x] Full backstep — reverse memory writes in addition to register state
 - [x] Watch panel — pin registers or memory addresses; values update on every step
 
-### v0.4.0 — Editor & UX Polish (planned)
+### v0.4.0 — Editor & UX Polish ✓
 
-- [ ] Find / replace in editor
-- [ ] Multiple file tabs (open more than one `.s` file at a time)
-- [ ] Inline error markers (squiggles under the offending token, not just line background)
-- [ ] Light / dark theme toggle
+- [x] Find / replace in editor
+- [x] Multiple file tabs (open more than one `.s` file at a time)
+- [x] Inline error markers (squiggles under the offending token, not just line background)
+- [x] Light / dark theme toggle
 
 ### Future / Stretch
 

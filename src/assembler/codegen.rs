@@ -266,6 +266,10 @@ fn resolve_pseudo_ops(
                     let upper = (addr.wrapping_add(0x800)) >> 12;
                     return Ok(pseudo::Operand::Imm(addr as i32 - ((upper as i32) << 12)));
                 }
+                // CSR names must not be resolved as labels — leave them for csr_op.
+                if is_csr_name(s) {
+                    return Ok(o.clone());
+                }
                 let addr = resolve_label(s, sym)?;
                 Ok(pseudo::Operand::Imm((addr as i32).wrapping_sub(pc as i32)))
             } else {
@@ -273,6 +277,29 @@ fn resolve_pseudo_ops(
             }
         })
         .collect()
+}
+
+fn is_csr_name(s: &str) -> bool {
+    matches!(
+        s,
+        "fflags"
+            | "frm"
+            | "fcsr"
+            | "cycle"
+            | "time"
+            | "instret"
+            | "cycleh"
+            | "instreth"
+            | "mstatus"
+            | "misa"
+            | "mie"
+            | "mtvec"
+            | "mscratch"
+            | "mepc"
+            | "mcause"
+            | "mtval"
+            | "mip"
+    )
 }
 
 fn resolve_ops(ops: &[Operand], pc: u32, sym: &SymbolTable) -> Result<Vec<pseudo::Operand>> {

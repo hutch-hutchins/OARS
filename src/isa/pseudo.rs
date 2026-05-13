@@ -170,6 +170,43 @@ pub fn expand(mnemonic: &str, ops: &[Operand]) -> Option<Vec<RealInstr>> {
             vec![RealInstr::new("fsgnjn.d", vec![fd, fs.clone(), fs])]
         }
 
+        // ── CSR pseudo-instructions ───────────────────────────────────────────
+        // csrr  rd, csr        →  csrrs rd, csr, x0
+        "csrr" => {
+            let (rd, csr) = (ops[0].clone(), ops[1].clone());
+            vec![RealInstr::new("csrrs", vec![rd, csr, Reg(0)])]
+        }
+        // csrw  csr, rs        →  csrrw x0, csr, rs
+        "csrw" => {
+            let (csr, rs) = (ops[0].clone(), ops[1].clone());
+            vec![RealInstr::new("csrrw", vec![Reg(0), csr, rs])]
+        }
+        // csrs  csr, rs        →  csrrs x0, csr, rs
+        "csrs" => {
+            let (csr, rs) = (ops[0].clone(), ops[1].clone());
+            vec![RealInstr::new("csrrs", vec![Reg(0), csr, rs])]
+        }
+        // csrc  csr, rs        →  csrrc x0, csr, rs
+        "csrc" => {
+            let (csr, rs) = (ops[0].clone(), ops[1].clone());
+            vec![RealInstr::new("csrrc", vec![Reg(0), csr, rs])]
+        }
+        // csrwi csr, uimm      →  csrrwi x0, csr, uimm
+        "csrwi" => {
+            let (csr, uimm) = (ops[0].clone(), ops[1].clone());
+            vec![RealInstr::new("csrrwi", vec![Reg(0), csr, uimm])]
+        }
+        // csrsi csr, uimm      →  csrrsi x0, csr, uimm
+        "csrsi" => {
+            let (csr, uimm) = (ops[0].clone(), ops[1].clone());
+            vec![RealInstr::new("csrrsi", vec![Reg(0), csr, uimm])]
+        }
+        // csrci csr, uimm      →  csrrci x0, csr, uimm
+        "csrci" => {
+            let (csr, uimm) = (ops[0].clone(), ops[1].clone());
+            vec![RealInstr::new("csrrci", vec![Reg(0), csr, uimm])]
+        }
+
         _ => return None,
     })
 }

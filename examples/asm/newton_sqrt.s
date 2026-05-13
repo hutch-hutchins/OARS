@@ -86,5 +86,6 @@ nr_done:
     li   a7, 4
     ecall
 
+    li   a0, 0
     li   a7, 10
     ecall
