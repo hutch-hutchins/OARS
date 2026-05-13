@@ -264,3 +264,97 @@ fn exec_csr(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::assembler::{codegen, parser};
+    use crate::cli::RunOpts;
+    use crate::hardware::memory::TEXT_BASE;
+    use crate::simulator::backstepper::Backstepper;
+    use std::io::Cursor;
+
+    /// Assemble `src`, run it to completion, return (stdout, exit_code).
+    fn run_src(src: &str) -> (String, i32) {
+        let stmts = parser::parse(src).expect("parse failed");
+        let mut cpu = CpuState::new(TEXT_BASE);
+        let out = codegen::assemble(&stmts, &mut cpu.mem).expect("assemble failed");
+        cpu.pc = out.entry;
+        let mut stdout = Vec::<u8>::new();
+        let mut stdin = Cursor::new(b"");
+        let opts = RunOpts::default();
+        let telem = run(&mut cpu, &opts, &mut stdout, &mut stdin).expect("run failed");
+        (String::from_utf8(stdout).unwrap(), telem.exit_code)
+    }
+
+    #[test]
+    fn print_int_syscall() {
+        let (out, _) = run_src(".text\nmain: li a7,1\n li a0,-42\n ecall\n li a7,10\n ecall\n");
+        assert_eq!(out, "-42");
+    }
+
+    #[test]
+    fn syscall_34_print_hex() {
+        let (out, _) = run_src(".text\nmain: li a7,34\n li a0,255\n ecall\n li a7,10\n ecall\n");
+        assert_eq!(out, "0x000000ff");
+    }
+
+    #[test]
+    fn syscall_35_print_binary() {
+        let (out, _) = run_src(".text\nmain: li a7,35\n li a0,5\n ecall\n li a7,10\n ecall\n");
+        assert_eq!(out, "0b00000000000000000000000000000101");
+    }
+
+    #[test]
+    fn syscall_36_print_unsigned() {
+        // -1 as signed == 4294967295 as unsigned
+        let (out, _) = run_src(".text\nmain: li a7,36\n li a0,-1\n ecall\n li a7,10\n ecall\n");
+        assert_eq!(out, "4294967295");
+    }
+
+    #[test]
+    fn syscall_93_exit_code() {
+        let (_, code) = run_src(".text\nmain: li a7,93\n li a0,7\n ecall\n");
+        assert_eq!(code, 7);
+    }
+
+    #[test]
+    fn backstep_reverses_sw() {
+        // lui t0, 0x10010  →  t0 = 0x10010000 (= DATA_BASE)
+        // sw  a0, 0(t0)    →  stores a0 into DATA_BASE
+        // (no la pseudo — avoids the AUIPC+ADDI two-instruction expansion)
+        let src = ".text\nmain: lui t0,0x10010\n sw a0,0(t0)\n li a7,10\n ecall\n";
+        let stmts = parser::parse(src).expect("parse");
+        let mut cpu = CpuState::new(TEXT_BASE);
+        let out = codegen::assemble(&stmts, &mut cpu.mem).expect("assemble");
+        cpu.pc = out.entry;
+        cpu.regs.write(10, 0xDEAD_BEEF);
+
+        let mut console = String::new();
+        let mut queue = std::collections::VecDeque::new();
+        let mut bs = Backstepper::new();
+
+        // Helper: do one journaled step and push snapshot
+        let do_step = |cpu: &mut CpuState,
+                       console: &mut String,
+                       queue: &mut std::collections::VecDeque<String>,
+                       bs: &mut Backstepper| {
+            let saved_pc = cpu.pc;
+            let saved_regs = cpu.regs.snapshot();
+            let saved_fp = cpu.fp.snapshot();
+            cpu.mem.begin_journal();
+            step_one(cpu, console, queue);
+            let (undo, hp) = cpu.mem.end_journal();
+            bs.push(saved_pc, saved_regs, saved_fp, undo, hp);
+        };
+
+        do_step(&mut cpu, &mut console, &mut queue, &mut bs); // lui t0, ...
+        do_step(&mut cpu, &mut console, &mut queue, &mut bs); // sw a0, 0(t0)
+
+        assert_eq!(cpu.mem.load_word(0x1001_0000), 0xDEAD_BEEF);
+
+        // Backstep once — reverses the sw
+        bs.pop(&mut cpu.pc, &mut cpu.regs, &mut cpu.fp, &mut cpu.mem);
+        assert_eq!(cpu.mem.load_word(0x1001_0000), 0x0000_0000);
+    }
+}

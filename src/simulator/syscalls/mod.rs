@@ -268,3 +268,94 @@ pub fn dispatch_gui(
 
     Ok(GuiSyscallOutcome::Continue)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::hardware::{fp_registers::FpRegisters, memory::Memory, registers::RegisterFile};
+    use std::io::Cursor;
+
+    fn dispatch_cli(num: u32, a0: u32) -> String {
+        let mut regs = RegisterFile::new();
+        let mut fp = FpRegisters::new();
+        let mut mem = Memory::new();
+        regs.write(17, num); // a7
+        regs.write(10, a0); // a0
+        let mut out = Vec::<u8>::new();
+        let mut stdin = Cursor::new(b"");
+        dispatch(&mut regs, &mut fp, &mut mem, 0, &mut out, &mut stdin).unwrap();
+        String::from_utf8(out).unwrap()
+    }
+
+    fn dispatch_gui_str(num: u32, a0: u32) -> String {
+        let mut regs = RegisterFile::new();
+        let mut fp = FpRegisters::new();
+        let mut mem = Memory::new();
+        regs.write(17, num);
+        regs.write(10, a0);
+        let mut console = String::new();
+        let mut queue = VecDeque::new();
+        dispatch_gui(&mut regs, &mut fp, &mut mem, 0, &mut console, &mut queue).unwrap();
+        console
+    }
+
+    #[test]
+    fn syscall_34_hex_cli() {
+        assert_eq!(dispatch_cli(34, 255), "0x000000ff");
+    }
+
+    #[test]
+    fn syscall_34_hex_gui() {
+        assert_eq!(dispatch_gui_str(34, 255), "0x000000ff");
+    }
+
+    #[test]
+    fn syscall_35_binary_cli() {
+        assert_eq!(dispatch_cli(35, 5), "0b00000000000000000000000000000101");
+    }
+
+    #[test]
+    fn syscall_35_binary_gui() {
+        assert_eq!(
+            dispatch_gui_str(35, 5),
+            "0b00000000000000000000000000000101"
+        );
+    }
+
+    #[test]
+    fn syscall_36_unsigned_cli() {
+        assert_eq!(dispatch_cli(36, u32::MAX), "4294967295");
+    }
+
+    #[test]
+    fn syscall_36_unsigned_gui() {
+        assert_eq!(dispatch_gui_str(36, u32::MAX), "4294967295");
+    }
+
+    #[test]
+    fn syscall_93_halts_cli() {
+        let mut regs = RegisterFile::new();
+        let mut fp = FpRegisters::new();
+        let mut mem = Memory::new();
+        regs.write(17, 93);
+        regs.write(10, 42); // exit code
+        let mut out = Vec::<u8>::new();
+        let mut stdin = Cursor::new(b"");
+        let cont = dispatch(&mut regs, &mut fp, &mut mem, 0, &mut out, &mut stdin).unwrap();
+        assert!(!cont);
+    }
+
+    #[test]
+    fn syscall_93_halts_gui() {
+        let mut regs = RegisterFile::new();
+        let mut fp = FpRegisters::new();
+        let mut mem = Memory::new();
+        regs.write(17, 93);
+        regs.write(10, 7);
+        let mut console = String::new();
+        let mut queue = VecDeque::new();
+        let outcome =
+            dispatch_gui(&mut regs, &mut fp, &mut mem, 0, &mut console, &mut queue).unwrap();
+        assert!(matches!(outcome, GuiSyscallOutcome::Halt));
+    }
+}
