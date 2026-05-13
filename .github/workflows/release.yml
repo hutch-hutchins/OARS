@@ -11,7 +11,7 @@ jobs:
   build:
     name: Build (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
-    continue-on-error: true        # one platform failing won't block the release
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -21,12 +21,7 @@ jobs:
             binary: oars.exe
             archive: oars-windows-x86_64.zip
 
-          - os: macos-13          # Intel runner
-            target: x86_64-apple-darwin
-            binary: oars
-            archive: oars-macos-intel.tar.gz
-
-          - os: macos-latest      # ARM runner (M1/M2)
+          - os: macos-latest
             target: aarch64-apple-darwin
             binary: oars
             archive: oars-macos-arm.tar.gz
@@ -47,7 +42,7 @@ jobs:
         with:
           key: release-${{ matrix.target }}
 
-      # Linux: headers required by egui/eframe (X11, Wayland, udev, GTK for rfd)
+      # Linux: headers required by egui/eframe
       - name: Install Linux system libraries
         if: runner.os == 'Linux'
         run: |
@@ -75,30 +70,11 @@ jobs:
             -C "target/${{ matrix.target }}/release" \
             "${{ matrix.binary }}"
 
-      - uses: actions/upload-artifact@v4
+      # Each build job creates/updates the release directly so there is no
+      # separate release job that can get stuck waiting on slow runners.
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: ${{ matrix.archive }}
-          path: ${{ matrix.archive }}
-
-  release:
-    name: Publish GitHub Release
-    needs: build
-    runs-on: ubuntu-latest
-    # Run even if some build jobs failed (continue-on-error above means
-    # the build job itself is always "success" from needs' perspective,
-    # but guard here too in case of infra failures)
-    if: always()
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          merge-multiple: true
-          path: dist/
-
-      - name: List downloaded artifacts
-        run: ls -lh dist/
-
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: dist/*
+          files: ${{ matrix.archive }}
           generate_release_notes: true
-          fail_on_unmatched_files: false
+          fail_on_unmatched_files: true
