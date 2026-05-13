@@ -202,3 +202,34 @@ fn example_heap_alloc() {
         "expected heap array: {out:?}"
     );
 }
+
+// ── Linked list via heap allocation ───────────────────────────────────────────
+
+#[test]
+fn example_linked_list() {
+    let (out, code) = run_example("linked_list.s");
+    assert_eq!(code, 0);
+    assert_eq!(out, "10\n20\n30\n", "wrong linked-list output: {out:?}");
+}
+
+// ── String operations: strlen + str_reverse ───────────────────────────────────
+
+#[test]
+fn example_string_ops() {
+    let (out, code) = run_example("string_ops.s");
+    assert_eq!(code, 0);
+    assert!(out.contains("Length: 5"), "missing length: {out:?}");
+    assert!(out.contains("olleh"), "missing reversed string: {out:?}");
+}
+
+// ── Selection sort: {64,25,12,22,11} → "11 12 22 25 64 " ─────────────────────
+
+#[test]
+fn example_selection_sort() {
+    let (out, code) = run_example("selection_sort.s");
+    assert_eq!(code, 0);
+    assert!(
+        out.contains("11 12 22 25 64"),
+        "expected sorted output: {out:?}"
+    );
+}

@@ -23,14 +23,14 @@ Get the latest release from the **[Releases page](../../releases/latest)** and e
 1. Launch `oars.exe` (Windows) or `oars` (macOS / Linux).
 2. Type or paste your RISC-V assembly in the **Editor** tab.
 3. Click **Assemble** in the toolbar — the view switches to the **Text Segment** tab showing each instruction's address and machine code.
-4. Click **Run** to execute, or use **Step** / **Backstep** to single-step through your program.
+4. Click **Run** to execute, or use **Step** / **Step Over** / **Step Out** / **Backstep** to navigate through your program.
 5. Watch register values update in real time in the right panel — changed registers are highlighted green.
 
 ## The Interface
 
 ```text
 ┌─ Menu bar (File / Help) ───────────────────────────────────────────────┐
-├─ Toolbar: Assemble | Run | Step | Backstep | Pause | Reset | status ───┤
+├─ Toolbar: Assemble | Run | Step | Step Over | Step Out | Backstep | Pause | Reset ─┤
 │                                                    │                   │
 │  ┌─ Editor ──── Text Segment ─────────────────┐  │  Integer           │
 │  │                                             │  │  Float             │
@@ -56,6 +56,8 @@ Get the latest release from the **[Releases page](../../releases/latest)** and e
 | **Assemble** | Always | Parse and assemble the source; switches to Text Segment on success |
 | **Run** | After assembling | Run at full speed until halt or breakpoint |
 | **Step** | Assembled, not running | Execute one instruction |
+| **Step Over** | Assembled, not running | Like Step, but executes through `call` instructions as a unit |
+| **Step Out** | Assembled, not running | Run until the current function returns to its caller |
 | **Backstep** | Steps in history | Undo the last instruction |
 | **Pause** | While running | Pause execution |
 | **Reset** | After assembling | Re-assemble and reset CPU state |
@@ -104,6 +106,9 @@ Ready-to-run examples in [`examples/asm/`](examples/asm/) cover the advanced ins
 | [`stack_frame.s`](examples/asm/stack_frame.s) | ABI — `call`/`ret`, callee-saved regs, stack frame | `sum_of_squares(5) = 55` via a fully ABI-compliant subroutine |
 | [`factorial.s`](examples/asm/factorial.s) | ABI — recursive calls, `sw`/`lw` on stack | Recursive `10! = 3628800`; demonstrates saving `ra` and `a0` across calls |
 | [`heap_alloc.s`](examples/asm/heap_alloc.s) | Syscall 9 — `sbrk` | Dynamic heap allocation: fill and print an 8-element array |
+| [`linked_list.s`](examples/asm/linked_list.s) | Syscall 9 — `sbrk`, `lb`/`sb`, pointer chasing | Singly linked list: allocate nodes, link them, traverse and print |
+| [`string_ops.s`](examples/asm/string_ops.s) | `lb`/`sb`, byte-level loops | `strlen` + `str_reverse` subroutines applied to `"hello"` |
+| [`selection_sort.s`](examples/asm/selection_sort.s) | Nested loops, `lw`/`sw`, index arithmetic | Selection sort on `{64,25,12,22,11}` → `11 12 22 25 64` |
 
 Open any file in OARS, click **Assemble**, then **Run** to see the output in the Console panel.
 
@@ -178,18 +183,31 @@ The binary will be at `target/release/oars` (or `oars.exe` on Windows).
 
 ## Roadmap
 
-### v0.4.0 — Current Release ✓
+### v0.5.0 — Current Release ✓
 
-#### Export
+#### Debugger
 
-- [x] `File → Export Flat Binary…` — saves raw text-segment bytes (load at `TEXT_BASE`)
-- [x] `File → Export ELF…` — minimal ELF32 RISC-V executable with PT_LOAD segments (text r-x, data rw-)
+- [x] **Step Over** — executes through a `call` and pauses at the instruction after it; otherwise behaves like Step
+- [x] **Step Out** — runs until the current function returns (watches saved `ra`), then pauses
+- [x] **Memory watchpoints** — set a write-watchpoint on any byte address; execution pauses immediately after any instruction that writes to a watched address; managed in a dedicated **Watchpoints** bottom-panel tab
 
 #### Examples & Tests
 
-- [x] 3 new ABI examples: `stack_frame.s` (subroutine with saved regs), `factorial.s` (recursive), `heap_alloc.s` (sbrk)
-- [x] `.asciz` directive support (alias for `.asciiz` / `.string`)
+- [x] 3 new examples: `linked_list.s` (heap-allocated linked list), `string_ops.s` (`strlen` + `str_reverse`), `selection_sort.s`
+- [x] Integration test suite grown to 16 tests, all passing
+
+### v0.4.0 ✓
+
+#### Export & Assembler
+
+- [x] `File → Export Flat Binary…` — saves raw text-segment bytes (load at `TEXT_BASE`)
+- [x] `File → Export ELF…` — minimal ELF32 RISC-V executable with PT_LOAD segments (text r-x, data rw-)
+- [x] `.asciz` directive recognised (alias for `.asciiz` / `.string`)
 - [x] `ret` / `jr` pseudo-op fix: now correctly emits `jalr rd, 0(rs1)`
+
+#### v0.4.0 Examples & Tests
+
+- [x] 3 ABI examples: `stack_frame.s`, `factorial.s`, `heap_alloc.s`
 - [x] Integration test suite grown to 13 tests, all passing
 
 ### v0.3.0 — Prior Release ✓

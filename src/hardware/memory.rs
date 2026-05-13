@@ -1,5 +1,5 @@
 use crate::util::error::OarsError;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub const TEXT_BASE: u32 = 0x0040_0000;
 pub const DATA_BASE: u32 = 0x1001_0000;
@@ -15,6 +15,9 @@ pub struct Memory {
     journaling: bool,
     // heap_ptr captured at begin_journal so restore gets the pre-step value.
     journal_heap_ptr: u32,
+    // Memory watchpoints: any write to a watched address sets watchpoint_triggered.
+    watchpoints: HashSet<u32>,
+    watchpoint_triggered: Option<u32>,
 }
 
 impl Memory {
@@ -25,7 +28,30 @@ impl Memory {
             journal: HashMap::new(),
             journaling: false,
             journal_heap_ptr: HEAP_BASE,
+            watchpoints: HashSet::new(),
+            watchpoint_triggered: None,
         }
+    }
+
+    pub fn add_watchpoint(&mut self, addr: u32) {
+        self.watchpoints.insert(addr);
+    }
+
+    pub fn remove_watchpoint(&mut self, addr: u32) {
+        self.watchpoints.remove(&addr);
+    }
+
+    pub fn clear_watchpoints(&mut self) {
+        self.watchpoints.clear();
+    }
+
+    pub fn has_watchpoint(&self, addr: u32) -> bool {
+        self.watchpoints.contains(&addr)
+    }
+
+    /// Returns the address of a triggered watchpoint since the last call, then clears it.
+    pub fn take_watchpoint_hit(&mut self) -> Option<u32> {
+        self.watchpoint_triggered.take()
     }
 
     /// Start recording writes for one instruction's worth of undo data.
@@ -75,6 +101,9 @@ impl Memory {
         if self.journaling && !self.journal.contains_key(&addr) {
             let old = self.data.get(&addr).copied();
             self.journal.insert(addr, old);
+        }
+        if self.watchpoints.contains(&addr) {
+            self.watchpoint_triggered = Some(addr);
         }
         self.data.insert(addr, val);
     }

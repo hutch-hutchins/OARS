@@ -28,6 +28,9 @@ enum SimState {
     Paused,
     WaitingInput,
     WaitingChar,
+    StepOver(u32),      // running until PC == this address
+    StepOut(u32),       // running until PC == saved ra
+    WatchpointHit(u32), // paused after a write to this address
     Halted(i32),
     Error(String, Option<(u32, u32)>), // message, optional (1-based line, 1-based col)
 }
@@ -44,6 +47,7 @@ enum BottomTab {
     Memory,
     Data,
     Stack,
+    Watchpoints,
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -67,6 +71,24 @@ enum WatchTarget {
 struct Watch {
     label: String,
     target: WatchTarget,
+}
+
+/// True if `word` is a call instruction (jal/jalr with rd = ra = x1).
+fn is_call_instr(word: u32) -> bool {
+    let opc = word & 0x7F;
+    let rd = (word >> 7) & 0x1F;
+    (opc == 0x6F && rd == 1) || (opc == 0x67 && rd == 1 && ((word >> 12) & 0x7) == 0)
+}
+
+/// Parse a hex ("0x…") or decimal string into a u32 address.
+fn parse_addr(s: &str) -> Option<u32> {
+    let s = s.trim();
+    if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+        let clean: String = hex.chars().filter(|&c| c != '_').collect();
+        u32::from_str_radix(&clean, 16).ok()
+    } else {
+        s.parse::<u32>().ok()
+    }
 }
 
 fn parse_watch_target(input: &str) -> Option<WatchTarget> {
@@ -121,6 +143,8 @@ struct Tab {
     input_buf: String,
     input_queue: VecDeque<String>,
     breakpoints: HashSet<u32>,
+    watchpoint_addrs: HashSet<u32>,
+    watchpoint_input: String,
     prev_int_regs: [u32; 32],
     prev_fp_regs: [u64; 32],
     main_tab: MainTab,
@@ -144,6 +168,8 @@ impl Tab {
             input_buf: String::new(),
             input_queue: VecDeque::new(),
             breakpoints: HashSet::new(),
+            watchpoint_addrs: HashSet::new(),
+            watchpoint_input: String::new(),
             prev_int_regs: [0u32; 32],
             prev_fp_regs: [0u64; 32],
             main_tab: MainTab::Editor,
@@ -265,6 +291,9 @@ impl Tab {
             }
             Ok(out) => {
                 cpu.pc = out.entry;
+                for &addr in &self.watchpoint_addrs {
+                    cpu.mem.add_watchpoint(addr);
+                }
                 self.cpu = Some(cpu);
                 self.asm_out = Some(out);
                 self.sim_state = SimState::Ready;
@@ -290,13 +319,44 @@ impl Tab {
             cpu.mem.begin_journal();
             let outcome = engine::step_one(cpu, &mut self.console_out, &mut self.input_queue);
             let (mem_undo, heap_ptr) = cpu.mem.end_journal();
+            let wp_hit = cpu.mem.take_watchpoint_hit();
             self.backstepper
                 .push(saved_pc, saved_regs, saved_fp, mem_undo, heap_ptr);
             self.apply_outcome(outcome);
             if matches!(self.sim_state, SimState::Running) {
                 self.sim_state = SimState::Paused;
             }
+            if let Some(addr) = wp_hit {
+                if !matches!(self.sim_state, SimState::Halted(_) | SimState::Error(_, _)) {
+                    self.sim_state = SimState::WatchpointHit(addr);
+                }
+            }
         }
+    }
+
+    fn do_step_over(&mut self) {
+        let call_target: Option<u32> = if let Some(ref cpu) = self.cpu {
+            let word = cpu.mem.load_word(cpu.pc);
+            if is_call_instr(word) {
+                Some(cpu.pc + 4)
+            } else {
+                None
+            }
+        } else {
+            return;
+        };
+        match call_target {
+            Some(target) => self.sim_state = SimState::StepOver(target),
+            None => self.do_step(),
+        }
+    }
+
+    fn do_step_out(&mut self) {
+        let return_addr = match self.cpu.as_ref() {
+            Some(cpu) => cpu.regs.read(1), // ra = x1
+            None => return,
+        };
+        self.sim_state = SimState::StepOut(return_addr);
     }
 
     fn do_backstep(&mut self) {
@@ -333,10 +393,23 @@ impl Tab {
 
     fn pump_steps(&mut self, n: u32) {
         for _ in 0..n {
-            if !matches!(self.sim_state, SimState::Running) {
+            if !matches!(
+                self.sim_state,
+                SimState::Running | SimState::StepOver(_) | SimState::StepOut(_)
+            ) {
                 return;
             }
+            let target_pc: Option<u32> = match self.sim_state {
+                SimState::StepOver(t) | SimState::StepOut(t) => Some(t),
+                _ => None,
+            };
             if let Some(ref cpu) = self.cpu {
+                if let Some(target) = target_pc {
+                    if cpu.pc == target {
+                        self.sim_state = SimState::Paused;
+                        return;
+                    }
+                }
                 if self.breakpoints.contains(&cpu.pc) {
                     self.sim_state = SimState::Paused;
                     return;
@@ -344,7 +417,14 @@ impl Tab {
             }
             if let Some(ref mut cpu) = self.cpu {
                 let outcome = engine::step_one(cpu, &mut self.console_out, &mut self.input_queue);
+                let wp_hit = cpu.mem.take_watchpoint_hit();
                 self.apply_outcome(outcome);
+                if let Some(addr) = wp_hit {
+                    if !matches!(self.sim_state, SimState::Halted(_) | SimState::Error(_, _)) {
+                        self.sim_state = SimState::WatchpointHit(addr);
+                    }
+                    return;
+                }
             } else {
                 self.sim_state = SimState::Idle;
                 return;
@@ -399,6 +479,11 @@ impl Tab {
             SimState::Ready => ("Ready".into(), egui::Color32::GREEN),
             SimState::Running => ("Running...".into(), egui::Color32::YELLOW),
             SimState::Paused => ("Paused".into(), egui::Color32::WHITE),
+            SimState::StepOver(_) => ("Step Over...".into(), egui::Color32::YELLOW),
+            SimState::StepOut(_) => ("Step Out...".into(), egui::Color32::YELLOW),
+            SimState::WatchpointHit(a) => {
+                (format!("Watchpoint hit: {a:#010x}"), egui::Color32::GOLD)
+            }
             SimState::WaitingInput => ("Waiting for input".into(), egui::Color32::LIGHT_BLUE),
             SimState::WaitingChar => ("Waiting for keypress".into(), egui::Color32::LIGHT_BLUE),
             SimState::Halted(0) => ("Halted (exit 0)".into(), egui::Color32::GREEN),
@@ -909,6 +994,76 @@ impl Tab {
                 });
             });
     }
+
+    fn show_watchpoints(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.label("Address:");
+            let resp = ui.add(
+                egui::TextEdit::singleline(&mut self.watchpoint_input)
+                    .hint_text("0x10010000 or decimal")
+                    .desired_width(160.0),
+            );
+            let add = (resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
+                || ui.button("Add").clicked();
+            if add && !self.watchpoint_input.is_empty() {
+                if let Some(addr) = parse_addr(&self.watchpoint_input) {
+                    self.watchpoint_addrs.insert(addr);
+                    if let Some(ref mut cpu) = self.cpu {
+                        cpu.mem.add_watchpoint(addr);
+                    }
+                    self.watchpoint_input.clear();
+                }
+            }
+            if ui.button("Clear All").clicked() {
+                self.watchpoint_addrs.clear();
+                if let Some(ref mut cpu) = self.cpu {
+                    cpu.mem.clear_watchpoints();
+                }
+            }
+        });
+        ui.separator();
+
+        if self.watchpoint_addrs.is_empty() {
+            ui.label(RichText::new("No watchpoints set.").weak());
+        } else {
+            let mut to_remove: Option<u32> = None;
+            let addrs: Vec<u32> = {
+                let mut v: Vec<u32> = self.watchpoint_addrs.iter().copied().collect();
+                v.sort();
+                v
+            };
+            egui::ScrollArea::vertical()
+                .id_salt("wp_scroll")
+                .auto_shrink([false; 2])
+                .show(ui, |ui| {
+                    for addr in addrs {
+                        ui.horizontal(|ui| {
+                            let hit =
+                                matches!(self.sim_state, SimState::WatchpointHit(a) if a == addr);
+                            let color = if hit {
+                                egui::Color32::GOLD
+                            } else {
+                                ui.visuals().text_color()
+                            };
+                            ui.label(
+                                RichText::new(format!("{addr:#010x}"))
+                                    .monospace()
+                                    .color(color),
+                            );
+                            if ui.small_button("×").clicked() {
+                                to_remove = Some(addr);
+                            }
+                        });
+                    }
+                });
+            if let Some(addr) = to_remove {
+                self.watchpoint_addrs.remove(&addr);
+                if let Some(ref mut cpu) = self.cpu {
+                    cpu.mem.remove_watchpoint(addr);
+                }
+            }
+        }
+    }
 }
 
 // ─── App ─────────────────────────────────────────────────────────────────────
@@ -983,7 +1138,10 @@ impl OarsApp {
     fn show_toolbar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             let assembled = self.tabs[self.active].cpu.is_some();
-            let running = matches!(self.tabs[self.active].sim_state, SimState::Running);
+            let running = matches!(
+                self.tabs[self.active].sim_state,
+                SimState::Running | SimState::StepOver(_) | SimState::StepOut(_)
+            );
             let waiting = matches!(
                 self.tabs[self.active].sim_state,
                 SimState::WaitingInput | SimState::WaitingChar
@@ -997,7 +1155,11 @@ impl OarsApp {
             let can_run = self.tabs[self.active].cpu.is_some()
                 && !matches!(
                     self.tabs[self.active].sim_state,
-                    SimState::Running | SimState::WaitingInput | SimState::WaitingChar
+                    SimState::Running
+                        | SimState::StepOver(_)
+                        | SimState::StepOut(_)
+                        | SimState::WaitingInput
+                        | SimState::WaitingChar
                 );
             if ui.add_enabled(can_run, egui::Button::new("Run")).clicked() {
                 self.tabs[self.active].do_run();
@@ -1010,6 +1172,20 @@ impl OarsApp {
                 .clicked()
             {
                 self.tabs[self.active].do_step();
+            }
+            if ui
+                .add_enabled(steppable, egui::Button::new("Step Over"))
+                .on_hover_text("Step over call instructions")
+                .clicked()
+            {
+                self.tabs[self.active].do_step_over();
+            }
+            if ui
+                .add_enabled(steppable, egui::Button::new("Step Out"))
+                .on_hover_text("Run until return from current function")
+                .clicked()
+            {
+                self.tabs[self.active].do_step_out();
             }
             if ui
                 .add_enabled(can_back, egui::Button::new("Backstep"))
@@ -2138,8 +2314,11 @@ impl eframe::App for OarsApp {
             egui::Visuals::light()
         });
 
-        // Auto-run: save snapshot before burst so highlights show per-frame changes.
-        if matches!(self.tabs[self.active].sim_state, SimState::Running) {
+        // Auto-run: drive Running / StepOver / StepOut per frame.
+        if matches!(
+            self.tabs[self.active].sim_state,
+            SimState::Running | SimState::StepOver(_) | SimState::StepOut(_)
+        ) {
             self.tabs[self.active].save_prev_regs();
             let n = self.steps_per_frame;
             self.tabs[self.active].pump_steps(n);
@@ -2274,6 +2453,11 @@ impl eframe::App for OarsApp {
                     ui.selectable_value(&mut self.bottom_tab, BottomTab::Memory, "Memory");
                     ui.selectable_value(&mut self.bottom_tab, BottomTab::Data, "Data Segment");
                     ui.selectable_value(&mut self.bottom_tab, BottomTab::Stack, "Stack");
+                    ui.selectable_value(
+                        &mut self.bottom_tab,
+                        BottomTab::Watchpoints,
+                        "Watchpoints",
+                    );
                 });
                 ui.separator();
                 match self.bottom_tab {
@@ -2281,6 +2465,7 @@ impl eframe::App for OarsApp {
                     BottomTab::Memory => self.show_memory_viewer(ui),
                     BottomTab::Data => self.tabs[self.active].show_data_segment(ui),
                     BottomTab::Stack => self.tabs[self.active].show_stack_viewer(ui),
+                    BottomTab::Watchpoints => self.tabs[self.active].show_watchpoints(ui),
                 }
             });
 
