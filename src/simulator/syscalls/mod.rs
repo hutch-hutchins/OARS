@@ -164,6 +164,7 @@ pub enum GuiSyscallOutcome {
     Continue,
     Halt,
     NeedInput,
+    NeedChar,
 }
 
 /// Dispatch an ECALL from the GUI run loop.
@@ -239,7 +240,7 @@ pub fn dispatch_gui(
         }
         12 => {
             if input_queue.is_empty() {
-                return Ok(GuiSyscallOutcome::NeedInput);
+                return Ok(GuiSyscallOutcome::NeedChar);
             }
             let line = input_queue.pop_front().unwrap();
             let c = line.chars().next().unwrap_or('\0') as u32;

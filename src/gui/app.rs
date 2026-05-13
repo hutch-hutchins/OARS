@@ -27,6 +27,7 @@ enum SimState {
     Running,
     Paused,
     WaitingInput,
+    WaitingChar,
     Halted(i32),
     Error(String, Option<(u32, u32)>), // message, optional (1-based line, 1-based col)
 }
@@ -327,6 +328,9 @@ impl Tab {
             StepOutcome::NeedInput => {
                 self.sim_state = SimState::WaitingInput;
             }
+            StepOutcome::NeedChar => {
+                self.sim_state = SimState::WaitingChar;
+            }
             StepOutcome::Halted(c) => {
                 self.sim_state = SimState::Halted(c);
             }
@@ -346,8 +350,14 @@ impl Tab {
     fn submit_input(&mut self) {
         let line = format!("{}\n", self.input_buf.trim_end_matches('\n'));
         self.input_queue.push_back(line.clone());
-        self.console_out.push_str(&format!("> {line}"));
+        self.console_out.push_str(&line);
         self.input_buf.clear();
+        self.sim_state = SimState::Running;
+    }
+
+    fn submit_char(&mut self, c: char) {
+        self.console_out.push(c);
+        self.input_queue.push_back(c.to_string());
         self.sim_state = SimState::Running;
     }
 
@@ -360,6 +370,7 @@ impl Tab {
             SimState::Running => ("Running...".into(), egui::Color32::YELLOW),
             SimState::Paused => ("Paused".into(), egui::Color32::WHITE),
             SimState::WaitingInput => ("Waiting for input".into(), egui::Color32::LIGHT_BLUE),
+            SimState::WaitingChar => ("Waiting for keypress".into(), egui::Color32::LIGHT_BLUE),
             SimState::Halted(0) => ("Halted (exit 0)".into(), egui::Color32::GREEN),
             SimState::Halted(n) => (format!("Halted (exit {n})"), egui::Color32::YELLOW),
             SimState::Error(m, _) => (format!("Error: {m}"), egui::Color32::RED),
@@ -461,12 +472,49 @@ impl Tab {
     }
 
     fn show_console(&mut self, ui: &mut egui::Ui) {
-        let waiting = matches!(self.sim_state, SimState::WaitingInput);
+        let waiting_line = matches!(self.sim_state, SimState::WaitingInput);
+        let waiting_char = matches!(self.sim_state, SimState::WaitingChar);
 
-        let avail = if waiting {
+        // Capture a single keypress for read_char (syscall 12)
+        if waiting_char {
+            let mut got: Option<char> = None;
+            ui.input(|i| {
+                for event in &i.events {
+                    match event {
+                        egui::Event::Text(s) => {
+                            if let Some(c) = s.chars().next() {
+                                got = Some(c);
+                                break;
+                            }
+                        }
+                        egui::Event::Key {
+                            key: egui::Key::Enter,
+                            pressed: true,
+                            ..
+                        } => {
+                            got = Some('\n');
+                            break;
+                        }
+                        _ => {}
+                    }
+                }
+            });
+            if let Some(c) = got {
+                self.submit_char(c);
+            }
+        }
+
+        let avail = if waiting_line {
             ui.available_height() - 40.0
         } else {
             ui.available_height()
+        };
+
+        // Append a block cursor when waiting for a single character
+        let display: std::borrow::Cow<str> = if waiting_char {
+            format!("{}█", self.console_out).into()
+        } else {
+            (&self.console_out).into()
         };
 
         egui::ScrollArea::vertical()
@@ -476,12 +524,12 @@ impl Tab {
             .stick_to_bottom(true)
             .show(ui, |ui| {
                 ui.add(
-                    egui::Label::new(RichText::new(&self.console_out).monospace().size(12.0))
+                    egui::Label::new(RichText::new(display.as_ref()).monospace().size(12.0))
                         .selectable(true),
                 );
             });
 
-        if waiting {
+        if waiting_line {
             ui.separator();
             let resp = ui.horizontal(|ui| {
                 ui.label("stdin:");
@@ -890,7 +938,10 @@ impl OarsApp {
         ui.horizontal(|ui| {
             let assembled = self.tabs[self.active].cpu.is_some();
             let running = matches!(self.tabs[self.active].sim_state, SimState::Running);
-            let waiting = matches!(self.tabs[self.active].sim_state, SimState::WaitingInput);
+            let waiting = matches!(
+                self.tabs[self.active].sim_state,
+                SimState::WaitingInput | SimState::WaitingChar
+            );
             let steppable = assembled && !running && !waiting;
             let can_back = assembled && !running && self.tabs[self.active].backstepper.len() > 0;
 
@@ -900,7 +951,7 @@ impl OarsApp {
             let can_run = self.tabs[self.active].cpu.is_some()
                 && !matches!(
                     self.tabs[self.active].sim_state,
-                    SimState::Running | SimState::WaitingInput
+                    SimState::Running | SimState::WaitingInput | SimState::WaitingChar
                 );
             if ui.add_enabled(can_run, egui::Button::new("Run")).clicked() {
                 self.tabs[self.active].do_run();

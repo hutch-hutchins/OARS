@@ -51,6 +51,7 @@ pub struct Telemetry {
 pub enum StepOutcome {
     Continue,
     NeedInput,
+    NeedChar,
     Halted(i32),
     Faulted(String),
 }
@@ -103,6 +104,7 @@ pub fn step_one(
             ) {
                 Err(e) => StepOutcome::Faulted(e.to_string()),
                 Ok(GuiSyscallOutcome::NeedInput) => StepOutcome::NeedInput,
+                Ok(GuiSyscallOutcome::NeedChar) => StepOutcome::NeedChar,
                 Ok(GuiSyscallOutcome::Halt) => StepOutcome::Halted(cpu.regs.read(10) as i32),
                 Ok(GuiSyscallOutcome::Continue) => {
                     cpu.pc = cpu.pc.wrapping_add(4);

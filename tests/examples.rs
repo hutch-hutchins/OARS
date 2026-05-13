@@ -125,3 +125,45 @@ fn example_newton_sqrt() {
         "hardware sqrt wrong: {out:?}"
     );
 }
+
+// ── Hello World ───────────────────────────────────────────────────────────────
+
+#[test]
+fn example_hello() {
+    let (out, code) = run_example("hello.s");
+    assert_eq!(code, 0);
+    assert_eq!(out, "Hello, World!\n", "wrong output: {out:?}");
+}
+
+// ── Fibonacci sequence (first 10 terms) ───────────────────────────────────────
+
+#[test]
+fn example_fibonacci() {
+    let (out, code) = run_example("fibonacci.s");
+    assert_eq!(code, 0);
+    assert_eq!(
+        out, "0\n1\n1\n2\n3\n5\n8\n13\n21\n34\n",
+        "wrong output: {out:?}"
+    );
+}
+
+// ── Floating-point smoke test: (3.0 + 4.0) * 0.5 = 3.5 ───────────────────────
+
+#[test]
+fn example_fp_test() {
+    let (out, code) = run_example("fp_test.s");
+    assert_eq!(code, 0);
+    assert_eq!(out, "FP result: 3.5\n", "wrong output: {out:?}");
+}
+
+// ── Bubble sort: [5,3,1,4,2] → "1 2 3 4 5 " ─────────────────────────────────
+
+#[test]
+fn example_bubble_sort() {
+    let (out, code) = run_example("bubble_sort.s");
+    assert_eq!(code, 0);
+    assert!(
+        out.contains("1 2 3 4 5"),
+        "expected sorted sequence: {out:?}"
+    );
+}
