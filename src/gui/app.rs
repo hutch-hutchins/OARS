@@ -883,6 +883,18 @@ impl Tab {
 
 // ─── App ─────────────────────────────────────────────────────────────────────
 
+#[derive(PartialEq, Eq, Clone, Copy)]
+enum HelpTab {
+    Pseudo,
+    Rv32i,
+    Rv32m,
+    Rv32f,
+    Rv32d,
+    Zicsr,
+    Directives,
+    Syscalls,
+}
+
 pub struct OarsApp {
     tabs: Vec<Tab>,
     active: usize,
@@ -894,6 +906,7 @@ pub struct OarsApp {
     watches: Vec<Watch>,
     watch_input: String,
     show_help: bool,
+    help_tab: HelpTab,
     dark_mode: bool,
 }
 
@@ -928,6 +941,7 @@ impl OarsApp {
             watches: Vec::new(),
             watch_input: String::new(),
             show_help: false,
+            help_tab: HelpTab::Pseudo,
             dark_mode: true,
         }
     }
@@ -1467,15 +1481,28 @@ fn instr_table(ui: &mut egui::Ui, id: &str, entries: &[(&str, &str, &str)]) {
         });
 }
 
-fn show_help_content(ui: &mut egui::Ui) {
-    ui.label(
-        RichText::new("OARS Instruction Reference — RV32IMFD + Zicsr, RARS-compatible").weak(),
-    );
-    ui.add_space(4.0);
+fn show_help_content(ui: &mut egui::Ui, active: &mut HelpTab) {
+    // Tab bar
+    ui.horizontal(|ui| {
+        ui.selectable_value(active, HelpTab::Pseudo, "Pseudo");
+        ui.selectable_value(active, HelpTab::Rv32i, "RV32I");
+        ui.selectable_value(active, HelpTab::Rv32m, "RV32M");
+        ui.selectable_value(active, HelpTab::Rv32f, "RV32F");
+        ui.selectable_value(active, HelpTab::Rv32d, "RV32D");
+        ui.selectable_value(active, HelpTab::Zicsr, "Zicsr");
+        ui.selectable_value(active, HelpTab::Directives, "Directives");
+        ui.selectable_value(active, HelpTab::Syscalls, "Syscalls");
+    });
+    ui.separator();
 
-    egui::CollapsingHeader::new("📌  Pseudo-Instructions  (most commonly used)")
-        .default_open(true)
+    egui::ScrollArea::vertical()
+        .id_salt("help_scroll")
+        .auto_shrink([false; 2])
         .show(ui, |ui| {
+    match active {
+        HelpTab::Pseudo => {
+            ui.label(RichText::new("Pseudo-Instructions — most commonly used").weak());
+            ui.add_space(4.0);
             instr_table(
                 ui,
                 "pseudo",
@@ -1524,11 +1551,11 @@ fn show_help_content(ui: &mut egui::Ui) {
                     ("sgtz rd, rs", "rd = 1 if rs > 0,   else 0", "sgtz t0, a0"),
                 ],
             );
-        });
+        }
 
-    egui::CollapsingHeader::new("🔢  RV32I — Base Integer Instructions")
-        .default_open(false)
-        .show(ui, |ui| {
+        HelpTab::Rv32i => {
+            ui.label(RichText::new("RV32I — Base Integer Instructions").weak());
+            ui.add_space(4.0);
             ui.label(RichText::new("Arithmetic (R-type)").strong());
             instr_table(
                 ui,
@@ -1725,11 +1752,11 @@ fn show_help_content(ui: &mut egui::Ui) {
                     ),
                 ],
             );
-        });
+        }
 
-    egui::CollapsingHeader::new("✖  RV32M — Multiply / Divide")
-        .default_open(false)
-        .show(ui, |ui| {
+        HelpTab::Rv32m => {
+            ui.label(RichText::new("RV32M — Multiply / Divide").weak());
+            ui.add_space(4.0);
             instr_table(
                 ui,
                 "rv32m",
@@ -1776,11 +1803,11 @@ fn show_help_content(ui: &mut egui::Ui) {
                     ),
                 ],
             );
-        });
+        }
 
-    egui::CollapsingHeader::new("🔵  RV32F — Single-Precision Floating Point")
-        .default_open(false)
-        .show(ui, |ui| {
+        HelpTab::Rv32f => {
+            ui.label(RichText::new("RV32F — Single-Precision Floating Point").weak());
+            ui.add_space(4.0);
             ui.label(RichText::new("Use fa0–fa7 for arguments, ft0–ft11 for temporaries, fs0–fs11 for saved values.").weak().small());
             ui.add_space(2.0);
             instr_table(ui, "rv32f", &[
@@ -1806,11 +1833,11 @@ fn show_help_content(ui: &mut egui::Ui) {
                 ("fmv.x.w   rd, fs",      "Move float bits to int register (no conv)", "fmv.x.w t0, ft0"),
                 ("fclass.s  rd, fs",      "rd = bitmask classifying fs (NaN, ±Inf…)",  "fclass.s t0, ft0"),
             ]);
-        });
+        }
 
-    egui::CollapsingHeader::new("🟣  RV32D — Double-Precision Floating Point")
-        .default_open(false)
-        .show(ui, |ui| {
+        HelpTab::Rv32d => {
+            ui.label(RichText::new("RV32D — Double-Precision Floating Point").weak());
+            ui.add_space(4.0);
             instr_table(
                 ui,
                 "rv32d",
@@ -1888,11 +1915,11 @@ fn show_help_content(ui: &mut egui::Ui) {
                     ),
                 ],
             );
-        });
+        }
 
-    egui::CollapsingHeader::new("⚙  Zicsr — Control & Status Register Instructions")
-        .default_open(false)
-        .show(ui, |ui| {
+        HelpTab::Zicsr => {
+            ui.label(RichText::new("Zicsr — Control & Status Register Instructions").weak());
+            ui.add_space(4.0);
             instr_table(
                 ui,
                 "csr",
@@ -1950,11 +1977,11 @@ fn show_help_content(ui: &mut egui::Ui) {
                     ),
                 ],
             );
-        });
+        }
 
-    egui::CollapsingHeader::new("📝  Assembler Directives")
-        .default_open(false)
-        .show(ui, |ui| {
+        HelpTab::Directives => {
+            ui.label(RichText::new("Assembler Directives").weak());
+            ui.add_space(4.0);
             instr_table(
                 ui,
                 "directives",
@@ -1984,11 +2011,11 @@ fn show_help_content(ui: &mut egui::Ui) {
                     (".space n", "Reserve n zero bytes", ".space 64"),
                 ],
             );
-        });
+        }
 
-    egui::CollapsingHeader::new("📞  ECALL — System Calls  (a7 = syscall number)")
-        .default_open(false)
-        .show(ui, |ui| {
+        HelpTab::Syscalls => {
+            ui.label(RichText::new("ECALL — System Calls  (a7 = syscall number)").weak());
+            ui.add_space(4.0);
             instr_table(
                 ui,
                 "syscalls",
@@ -2063,7 +2090,9 @@ fn show_help_content(ui: &mut egui::Ui) {
                     ),
                 ],
             );
-        });
+        }
+    } // match
+    }); // ScrollArea
 }
 
 // ─── eframe::App ─────────────────────────────────────────────────────────────
@@ -2088,13 +2117,13 @@ impl eframe::App for OarsApp {
         // Floating help window
         let mut help_open = self.show_help;
         if help_open {
+            let help_tab = &mut self.help_tab;
             egui::Window::new("Instruction Reference")
                 .open(&mut help_open)
-                .default_size([760.0, 540.0])
+                .default_size([820.0, 560.0])
                 .resizable(true)
-                .scroll([false, true])
                 .show(ctx, |ui| {
-                    show_help_content(ui);
+                    show_help_content(ui, help_tab);
                 });
         }
         self.show_help = help_open;
