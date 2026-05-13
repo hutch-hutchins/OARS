@@ -907,6 +907,7 @@ pub struct OarsApp {
     watch_input: String,
     show_help: bool,
     help_tab: HelpTab,
+    show_about: bool,
     dark_mode: bool,
 }
 
@@ -942,6 +943,7 @@ impl OarsApp {
             watch_input: String::new(),
             show_help: false,
             help_tab: HelpTab::Pseudo,
+            show_about: false,
             dark_mode: true,
         }
     }
@@ -2128,6 +2130,46 @@ impl eframe::App for OarsApp {
         }
         self.show_help = help_open;
 
+        // Floating About window
+        let mut about_open = self.show_about;
+        if about_open {
+            egui::Window::new("About OARS")
+                .open(&mut about_open)
+                .resizable(false)
+                .collapsible(false)
+                .default_width(380.0)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ctx, |ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(8.0);
+                        ui.label(RichText::new("OARS").size(28.0).strong());
+                        ui.label(
+                            RichText::new("Oxide Assembler and Runtime Simulator")
+                                .size(13.0)
+                                .weak(),
+                        );
+                        ui.add_space(12.0);
+                        ui.label(RichText::new(concat!("Version ", env!("CARGO_PKG_VERSION"))).monospace());
+                        ui.add_space(12.0);
+                        ui.label("A single-binary RISC-V simulator for students.");
+                        ui.label("No Java, no installer — just run the executable.");
+                        ui.add_space(12.0);
+                        ui.separator();
+                        ui.add_space(6.0);
+                        ui.label(RichText::new("© 2025 Nathan Hutchins").weak());
+                        ui.label(RichText::new("MIT License").weak());
+                        ui.add_space(4.0);
+                        ui.label(
+                            RichText::new("Inspired by RARS and MARS")
+                                .weak()
+                                .small(),
+                        );
+                        ui.add_space(8.0);
+                    });
+                });
+        }
+        self.show_about = about_open;
+
         // Menu bar
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
@@ -2161,6 +2203,11 @@ impl eframe::App for OarsApp {
                 ui.menu_button("Help", |ui| {
                     if ui.button("Instruction Reference").clicked() {
                         self.show_help = true;
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                    if ui.button("About OARS").clicked() {
+                        self.show_about = true;
                         ui.close_menu();
                     }
                 });
