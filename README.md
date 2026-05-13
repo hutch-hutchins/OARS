@@ -175,53 +175,50 @@ The binary will be at `target/release/oars` (or `oars.exe` on Windows).
 
 ## Roadmap
 
-Items are grouped by planned release. Checked items are complete and shipped.
+### v0.3.0 — Current Release ✓
 
-### v0.1.0 — Foundation ✓
+#### ISA & Core
 
 - [x] RV32I base integer ISA
-- [x] RV32M multiply / divide
+- [x] RV32M multiply / divide (`mul`, `mulh`, `mulhu`, `mulhsu`, `div`, `divu`, `rem`, `remu`)
 - [x] RV32F / RV32D single- and double-precision floating point
-- [x] Zicsr control-and-status register instructions
-- [x] Pseudo-instruction expansion (`li`, `la`, `mv`, `call`, `ret`, …)
-- [x] Assembler directives (`.text`, `.data`, `.word`, `.byte`, `.asciiz`, …)
-- [x] Syscalls 1–12 (print / read integer, float, double, string, character; sbrk; exit)
-- [x] CLI runner (`--dump-registers`, `--max-steps`, `--start-at-main`, `--telemetry`)
+- [x] Zicsr control-and-status register instructions (`csrrw`, `csrrs`, `csrrc` + immediate variants)
+- [x] Pseudo-instruction expansion (`li`, `la`, `mv`, `call`, `ret`, branch pseudos, CSR pseudos, FP pseudos, …)
+- [x] Assembler directives (`.text`, `.data`, `.word`, `.half`, `.byte`, `.float`, `.double`, `.asciiz`, `.string`, `.space`, `.align`, …)
+- [x] Syscalls 1–12, 34, 35, 36, 93 (print/read integer, float, double, string, char; hex, binary, unsigned; exit with code)
+- [x] CLI runner (`--dump-registers`, `--dump-fp-registers`, `--max-steps`, `--start-at-main`, `--telemetry`)
 
-### v0.2.0 — GUI & Debugger ✓
+#### GUI & Debugger
 
-- [x] egui / eframe native GUI (Windows, macOS ARM, Linux)
+- [x] egui / eframe native GUI — single double-clickable binary, no installer
 - [x] Editor tab with line numbers and RISC-V syntax highlighting
-- [x] Text segment tab (address, machine code, source, labels, breakpoints)
-- [x] Register panel — Integer / Float / CSR tabs, changed-register highlighting
-- [x] Memory viewer (hex dump, jump-to-region buttons, PC row highlighted)
-- [x] Data segment viewer (label column, 4-word rows, ASCII column)
-- [x] Stack viewer (sp indicator, used vs. free highlighting)
-- [x] Backstep — undo the last instruction (register state; 256-entry ring buffer)
+- [x] Inline error markers — squiggles on the offending token, red background on the line
+- [x] Find / replace in editor (Ctrl+F, case-sensitive toggle)
+- [x] Multiple file tabs — open more than one `.s` file at a time
+- [x] Text segment tab — address, machine code, source, labels, breakpoint toggles
+- [x] Register panel — Integer / Float / CSR tabs, changed-register highlighting (green)
+- [x] Memory viewer — hex dump, jump-to-region buttons, PC row highlighted yellow
+- [x] Data segment viewer — label column, 4-word rows, ASCII column
+- [x] Stack viewer — `sp` indicator, used-vs-free highlighting
+- [x] Watch panel — pin registers or memory addresses; values update on every step
+- [x] Backstep — undo the last instruction including memory writes (256-entry ring buffer)
 - [x] Breakpoints — click gutter dot or text-segment row to toggle
 - [x] Run-speed slider (logarithmic, 1 Hz → 2 MHz)
-- [x] Error highlighting — red background on the offending source line
-- [x] Help → Instruction Reference (pseudo, RV32I, RV32M, RV32F, RV32D, Zicsr, directives, syscalls)
-- [x] File open / save dialog (`.s` / `.asm` filter)
-- [x] GitHub Actions release builds (Windows, macOS ARM, Linux)
-
-### v0.3.0 — Completeness ✓
-
-- [x] Additional syscalls: 34 print hex, 35 print binary, 36 print unsigned, 93 exit with code
-- [x] Full backstep — reverse memory writes in addition to register state
-- [x] Watch panel — pin registers or memory addresses; values update on every step
-
-### v0.4.0 — Editor & UX Polish ✓
-
-- [x] Find / replace in editor
-- [x] Multiple file tabs (open more than one `.s` file at a time)
-- [x] Inline error markers (squiggles under the offending token, not just line background)
 - [x] Light / dark theme toggle
+- [x] Virtual terminal console — `read_char` captures a single keypress inline with a block cursor; line-buffered reads show an inline input field
+- [x] Help → Instruction Reference (tabbed: Pseudo / RV32I / RV32M / RV32F / RV32D / Zicsr / Directives / Syscalls)
+- [x] Help → About OARS
+- [x] File open / save dialog (`.s` / `.asm` filter)
+- [x] GitHub Actions release builds (Windows x86-64, macOS ARM, Linux x86-64)
 
-### Future / Stretch
+#### Examples & Tests
+
+- [x] 11 ready-to-run example programs in `examples/asm/` covering RV32M, RV32F, RV32D, Zicsr, and interactive console I/O
+- [x] Integration test suite — 10 tests, all passing
+
+### Future
 
 - [ ] Export assembled binary (ELF or raw flat binary)
-- [ ] Virtual terminal panel for interactive I/O (character-at-a-time stdin)
 - [ ] RV64I 64-bit mode
 
 ## License
