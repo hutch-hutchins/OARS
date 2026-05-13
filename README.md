@@ -12,7 +12,6 @@ Get the latest release from the **[Releases page](../../releases/latest)** and e
 | --- | --- |
 | Windows (64-bit) | `oars-windows-x86_64.zip` |
 | macOS — Apple Silicon (M1/M2/M3) | `oars-macos-arm.tar.gz` |
-| macOS — Intel | `oars-macos-intel.tar.gz` |
 | Linux (x86-64) | `oars-linux-x86_64.tar.gz` |
 
 > **macOS:** On first launch, right-click → Open to bypass the Gatekeeper warning, or run `xattr -cr oars` in Terminal.
@@ -119,10 +118,6 @@ main:
 | 10 | Exit | — | — |
 | 11 | Print character | `a0` = ASCII code | — |
 | 12 | Read character | — | `a0` |
-| 34 | Print integer (hex) | `a0` = value | — |
-| 35 | Print integer (binary) | `a0` = value | — |
-| 36 | Print unsigned integer | `a0` = value | — |
-| 93 | Exit with code | `a0` = exit code | — |
 
 ## ISA Coverage
 
@@ -156,6 +151,57 @@ cargo build --release
 ```
 
 The binary will be at `target/release/oars` (or `oars.exe` on Windows).
+
+## Roadmap
+
+Items are grouped by planned release. Checked items are complete and shipped.
+
+### v0.1.0 — Foundation ✓
+
+- [x] RV32I base integer ISA
+- [x] RV32M multiply / divide
+- [x] RV32F / RV32D single- and double-precision floating point
+- [x] Zicsr control-and-status register instructions
+- [x] Pseudo-instruction expansion (`li`, `la`, `mv`, `call`, `ret`, …)
+- [x] Assembler directives (`.text`, `.data`, `.word`, `.byte`, `.asciiz`, …)
+- [x] Syscalls 1–12 (print / read integer, float, double, string, character; sbrk; exit)
+- [x] CLI runner (`--dump-registers`, `--max-steps`, `--start-at-main`, `--telemetry`)
+
+### v0.2.0 — GUI & Debugger ✓
+
+- [x] egui / eframe native GUI (Windows, macOS ARM, Linux)
+- [x] Editor tab with line numbers and RISC-V syntax highlighting
+- [x] Text segment tab (address, machine code, source, labels, breakpoints)
+- [x] Register panel — Integer / Float / CSR tabs, changed-register highlighting
+- [x] Memory viewer (hex dump, jump-to-region buttons, PC row highlighted)
+- [x] Data segment viewer (label column, 4-word rows, ASCII column)
+- [x] Stack viewer (sp indicator, used vs. free highlighting)
+- [x] Backstep — undo the last instruction (register state; 256-entry ring buffer)
+- [x] Breakpoints — click gutter dot or text-segment row to toggle
+- [x] Run-speed slider (logarithmic, 1 Hz → 2 MHz)
+- [x] Error highlighting — red background on the offending source line
+- [x] Help → Instruction Reference (pseudo, RV32I, RV32M, RV32F, RV32D, Zicsr, directives, syscalls)
+- [x] File open / save dialog (`.s` / `.asm` filter)
+- [x] GitHub Actions release builds (Windows, macOS ARM, Linux)
+
+### v0.3.0 — Completeness (planned)
+
+- [ ] Additional syscalls: 34 print hex, 35 print binary, 36 print unsigned, 93 exit with code
+- [ ] Full backstep — reverse memory writes in addition to register state
+- [ ] Watch panel — pin registers or memory addresses; values update on every step
+
+### v0.4.0 — Editor & UX Polish (planned)
+
+- [ ] Find / replace in editor
+- [ ] Multiple file tabs (open more than one `.s` file at a time)
+- [ ] Inline error markers (squiggles under the offending token, not just line background)
+- [ ] Light / dark theme toggle
+
+### Future / Stretch
+
+- [ ] Export assembled binary (ELF or raw flat binary)
+- [ ] Virtual terminal panel for interactive I/O (character-at-a-time stdin)
+- [ ] RV64I 64-bit mode
 
 ## License
 
