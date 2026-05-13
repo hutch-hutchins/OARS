@@ -11,6 +11,7 @@ jobs:
   build:
     name: Build (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
+    continue-on-error: true        # one platform failing won't block the release
     strategy:
       fail-fast: false
       matrix:
@@ -83,14 +84,21 @@ jobs:
     name: Publish GitHub Release
     needs: build
     runs-on: ubuntu-latest
+    # Run even if some build jobs failed (continue-on-error above means
+    # the build job itself is always "success" from needs' perspective,
+    # but guard here too in case of infra failures)
+    if: always()
     steps:
       - uses: actions/download-artifact@v4
         with:
           merge-multiple: true
           path: dist/
 
+      - name: List downloaded artifacts
+        run: ls -lh dist/
+
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*
           generate_release_notes: true
-          fail_on_unmatched_files: true
+          fail_on_unmatched_files: false
