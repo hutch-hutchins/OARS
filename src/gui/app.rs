@@ -2149,7 +2149,10 @@ impl eframe::App for OarsApp {
                                 .weak(),
                         );
                         ui.add_space(12.0);
-                        ui.label(RichText::new(concat!("Version ", env!("CARGO_PKG_VERSION"))).monospace());
+                        ui.label(
+                            RichText::new(concat!("Version ", env!("CARGO_PKG_VERSION")))
+                                .monospace(),
+                        );
                         ui.add_space(12.0);
                         ui.label("A single-binary RISC-V simulator for students.");
                         ui.label("No Java, no installer — just run the executable.");
@@ -2159,11 +2162,7 @@ impl eframe::App for OarsApp {
                         ui.label(RichText::new("© 2025 Nathan Hutchins").weak());
                         ui.label(RichText::new("MIT License").weak());
                         ui.add_space(4.0);
-                        ui.label(
-                            RichText::new("Inspired by RARS and MARS")
-                                .weak()
-                                .small(),
-                        );
+                        ui.label(RichText::new("Inspired by RARS and MARS").weak().small());
                         ui.add_space(8.0);
                     });
                 });
