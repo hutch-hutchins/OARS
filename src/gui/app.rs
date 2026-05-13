@@ -959,7 +959,7 @@ impl OarsApp {
                 SimState::WaitingInput | SimState::WaitingChar
             );
             let steppable = assembled && !running && !waiting;
-            let can_back = assembled && !running && self.tabs[self.active].backstepper.len() > 0;
+            let can_back = assembled && !running && !self.tabs[self.active].backstepper.is_empty();
 
             if ui.button("Assemble").clicked() {
                 self.tabs[self.active].do_assemble();
