@@ -4,6 +4,7 @@ use crate::hardware::memory::{Memory, DATA_BASE, TEXT_BASE};
 use crate::isa::formats as f;
 use crate::isa::{pseudo, rv32m};
 use anyhow::{anyhow, Result};
+use std::collections::HashMap;
 
 /// One row in the text-segment view: assembled address, machine word, source line.
 pub struct TextRow {
@@ -18,18 +19,34 @@ pub struct AssemblyOutput {
     pub symbols: SymbolTable,
     pub entry: u32,
     pub text_rows: Vec<TextRow>,
+    /// Reverse map: address → labels defined at that address (for display).
+    pub addr_to_labels: HashMap<u32, Vec<String>>,
 }
 
 /// Assemble a list of `Statement`s into `mem`.
 /// Two-pass: pass 1 collects symbol addresses, pass 2 encodes instructions.
 pub fn assemble(stmts: &[Statement], mem: &mut Memory) -> Result<AssemblyOutput> {
     let symbols = pass1(stmts);
+    let addr_to_labels = build_addr_to_labels(&symbols);
     let (entry, text_rows) = pass2(stmts, &symbols, mem)?;
     Ok(AssemblyOutput {
         symbols,
         entry,
         text_rows,
+        addr_to_labels,
     })
+}
+
+fn build_addr_to_labels(symbols: &SymbolTable) -> HashMap<u32, Vec<String>> {
+    let mut map: HashMap<u32, Vec<String>> = HashMap::new();
+    for (name, &addr) in symbols.all() {
+        map.entry(addr).or_default().push(name.clone());
+    }
+    // Sort label lists for deterministic display order
+    for labels in map.values_mut() {
+        labels.sort();
+    }
+    map
 }
 
 // ─── Pass 1: collect labels ───────────────────────────────────────────────────

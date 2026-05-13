@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::path::PathBuf;
 
 use egui::RichText;
@@ -28,7 +28,7 @@ enum SimState {
     Paused,
     WaitingInput,
     Halted(i32),
-    Error(String),
+    Error(String, Option<u32>), // message, optional 1-based source line
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -73,6 +73,8 @@ pub struct OarsApp {
 
     register_tab: RegisterTab,
 
+    breakpoints: HashSet<u32>,
+
     // Register snapshots for change highlighting
     prev_int_regs: [u32; 32],
     prev_fp_regs: [u64; 32],
@@ -116,6 +118,7 @@ impl OarsApp {
             bottom_tab: BottomTab::Console,
             mem_view_base: DATA_BASE,
             register_tab: RegisterTab::Integer,
+            breakpoints: HashSet::new(),
             prev_int_regs: [0u32; 32],
             prev_fp_regs: [0u64; 32],
             show_help: false,
@@ -150,7 +153,7 @@ impl OarsApp {
                     self.do_reset_state();
                 }
                 Err(e) => {
-                    self.sim_state = SimState::Error(e.to_string());
+                    self.sim_state = SimState::Error(e.to_string(), None);
                 }
             }
         }
@@ -167,7 +170,7 @@ impl OarsApp {
         };
         if let Some(path) = path {
             if let Err(e) = std::fs::write(&path, &self.source) {
-                self.sim_state = SimState::Error(e.to_string());
+                self.sim_state = SimState::Error(e.to_string(), None);
             } else {
                 self.file_path = Some(path);
             }
@@ -179,14 +182,18 @@ impl OarsApp {
         let stmts = match parser::parse(&self.source) {
             Ok(s) => s,
             Err(e) => {
-                self.sim_state = SimState::Error(e.to_string());
+                let msg = e.to_string();
+                let line = parse_error_line(&msg);
+                self.sim_state = SimState::Error(msg, line);
                 return false;
             }
         };
         let mut cpu = CpuState::new(TEXT_BASE);
         match codegen::assemble(&stmts, &mut cpu.mem) {
             Err(e) => {
-                self.sim_state = SimState::Error(e.to_string());
+                let msg = e.to_string();
+                let line = parse_error_line(&msg);
+                self.sim_state = SimState::Error(msg, line);
                 false
             }
             Ok(out) => {
@@ -256,6 +263,13 @@ impl OarsApp {
             if !matches!(self.sim_state, SimState::Running) {
                 return;
             }
+            // Check breakpoint BEFORE executing so the PC shown is the hit address
+            if let Some(ref cpu) = self.cpu {
+                if self.breakpoints.contains(&cpu.pc) {
+                    self.sim_state = SimState::Paused;
+                    return;
+                }
+            }
             if let Some(ref mut cpu) = self.cpu {
                 let outcome = engine::step_one(cpu, &mut self.console_out, &mut self.input_queue);
                 self.apply_outcome(outcome);
@@ -276,7 +290,7 @@ impl OarsApp {
                 self.sim_state = SimState::Halted(c);
             }
             StepOutcome::Faulted(m) => {
-                self.sim_state = SimState::Error(m);
+                self.sim_state = SimState::Error(m, None);
             }
         }
         const CAP: usize = 64 * 1024;
@@ -307,7 +321,7 @@ impl OarsApp {
             SimState::WaitingInput => ("Waiting for input".into(), egui::Color32::LIGHT_BLUE),
             SimState::Halted(0) => ("Halted (exit 0)".into(), egui::Color32::GREEN),
             SimState::Halted(n) => (format!("Halted (exit {n})"), egui::Color32::YELLOW),
-            SimState::Error(m) => (format!("Error: {m}"), egui::Color32::RED),
+            SimState::Error(m, _) => (format!("Error: {m}"), egui::Color32::RED),
         }
     }
 
@@ -362,11 +376,34 @@ impl OarsApp {
             let (msg, color) = self.status_text();
             ui.label(RichText::new(msg).color(color));
 
-            if let Some(p) = &self.file_path {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            // Speed slider — right-aligned, log scale 1..500 000
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if let Some(p) = &self.file_path {
                     ui.label(RichText::new(p.display().to_string()).weak().small());
-                });
-            }
+                    ui.separator();
+                }
+                // Display as K or M for readability
+                let label = if self.steps_per_frame >= 1_000_000 {
+                    format!("{:.0}M/frame", self.steps_per_frame as f32 / 1_000_000.0)
+                } else if self.steps_per_frame >= 1_000 {
+                    format!("{:.0}K/frame", self.steps_per_frame as f32 / 1_000.0)
+                } else {
+                    format!("{}/frame", self.steps_per_frame)
+                };
+                ui.label(RichText::new(label).small());
+                // Log-scale slider: store log10 of steps_per_frame
+                let mut log_val = (self.steps_per_frame as f32).log10();
+                if ui
+                    .add(
+                        egui::Slider::new(&mut log_val, 0.0_f32..=6.0_f32)
+                            .show_value(false)
+                            .text("Speed"),
+                    )
+                    .changed()
+                {
+                    self.steps_per_frame = (10_f32.powf(log_val) as u32).max(1);
+                }
+            });
         });
     }
 
@@ -377,18 +414,66 @@ impl OarsApp {
             .and_then(|p| p.file_name())
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "untitled.s".to_owned());
+
+        // Pull error line out of state so we can pass it into the layouter closure
+        let error_line: Option<u32> = match &self.sim_state {
+            SimState::Error(_, ln) => *ln,
+            _ => None,
+        };
+
         ui.heading(title);
         ui.separator();
 
+        let source = &mut self.source;
         egui::ScrollArea::both()
             .id_salt("editor")
             .auto_shrink([false; 2])
             .show(ui, |ui| {
+                let mut layouter = |ui: &egui::Ui, text: &str, wrap_width: f32| {
+                    let mut job = egui::text::LayoutJob::default();
+                    job.wrap.max_width = wrap_width;
+                    for (i, line) in text.split('\n').enumerate() {
+                        let line_1based = (i + 1) as u32;
+                        let is_error = error_line == Some(line_1based);
+                        let bg = if is_error {
+                            egui::Color32::from_rgb(100, 20, 20)
+                        } else {
+                            egui::Color32::TRANSPARENT
+                        };
+                        let fg = if is_error {
+                            egui::Color32::from_rgb(255, 120, 120)
+                        } else {
+                            ui.visuals().text_color()
+                        };
+                        job.append(
+                            line,
+                            0.0,
+                            egui::TextFormat {
+                                font_id: egui::FontId::monospace(13.0),
+                                color: fg,
+                                background: bg,
+                                ..Default::default()
+                            },
+                        );
+                        // Re-add the newline (split removes it)
+                        if i + 1 < text.split('\n').count() {
+                            job.append(
+                                "\n",
+                                0.0,
+                                egui::TextFormat {
+                                    font_id: egui::FontId::monospace(13.0),
+                                    ..Default::default()
+                                },
+                            );
+                        }
+                    }
+                    ui.fonts(|f| f.layout_job(job))
+                };
                 ui.add(
-                    egui::TextEdit::multiline(&mut self.source)
+                    egui::TextEdit::multiline(source)
                         .font(egui::TextStyle::Monospace)
                         .desired_width(f32::INFINITY)
-                        .code_editor(),
+                        .layouter(&mut layouter),
                 );
             });
     }
@@ -670,76 +755,137 @@ impl OarsApp {
         let current_pc = self.cpu.as_ref().map(|c| c.pc);
         let source_lines: Vec<&str> = self.source.lines().collect();
 
-        if let Some(asm) = &self.asm_out {
-            let rows = &asm.text_rows;
-            TableBuilder::new(ui)
-                .striped(true)
-                .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-                .column(Column::initial(20.0).resizable(false))
-                .column(Column::initial(110.0).resizable(true))
-                .column(Column::initial(100.0).resizable(true))
-                .column(Column::remainder())
-                .header(20.0, |mut h| {
-                    h.col(|_| {});
-                    h.col(|ui| {
-                        ui.strong("Address");
-                    });
-                    h.col(|ui| {
-                        ui.strong("Machine Code");
-                    });
-                    h.col(|ui| {
-                        ui.strong("Source");
-                    });
-                })
-                .body(|body| {
-                    body.rows(18.0, rows.len(), |mut row| {
-                        let i = row.index();
-                        let tr = &rows[i];
-                        let hot = current_pc == Some(tr.addr);
-                        let src = source_lines
-                            .get(tr.src_line.saturating_sub(1) as usize)
-                            .copied()
-                            .unwrap_or("")
-                            .trim();
-
-                        row.col(|ui| {
-                            if hot {
-                                ui.label(RichText::new("→").color(egui::Color32::YELLOW));
-                            }
-                        });
-                        row.col(|ui| {
-                            let t = RichText::new(format!("{:#010x}", tr.addr)).monospace();
-                            ui.label(if hot {
-                                t.color(egui::Color32::YELLOW)
-                            } else {
-                                t
-                            });
-                        });
-                        row.col(|ui| {
-                            ui.label(RichText::new(format!("{:#010x}", tr.word)).monospace());
-                        });
-                        row.col(|ui| {
-                            let t = RichText::new(src).monospace();
-                            let resp = ui.label(if hot {
-                                t.color(egui::Color32::YELLOW)
-                            } else {
-                                t
-                            });
-                            if hot {
-                                resp.scroll_to_me(None);
-                            }
-                        });
-                    });
-                });
-        } else {
+        if self.asm_out.is_none() {
             ui.centered_and_justified(|ui| {
                 ui.label("Assemble first to view the text segment.");
             });
+            return;
         }
+
+        // Collect row data to avoid holding &self.asm_out across the mutable row closure
+        let rows: Vec<(u32, u32, u32, Option<String>)> = {
+            let asm = self.asm_out.as_ref().unwrap();
+            asm.text_rows
+                .iter()
+                .map(|tr| {
+                    let label = asm.addr_to_labels.get(&tr.addr).map(|v| v.join(", "));
+                    (tr.addr, tr.word, tr.src_line, label)
+                })
+                .collect()
+        };
+
+        TableBuilder::new(ui)
+            .striped(true)
+            .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+            .column(Column::initial(28.0).resizable(false)) // BP + PC indicator
+            .column(Column::initial(90.0).resizable(true)) // Label
+            .column(Column::initial(110.0).resizable(true)) // Address
+            .column(Column::initial(100.0).resizable(true)) // Machine Code
+            .column(Column::remainder()) // Source
+            .header(20.0, |mut h| {
+                h.col(|ui| {
+                    ui.weak("⬤");
+                });
+                h.col(|ui| {
+                    ui.strong("Label");
+                });
+                h.col(|ui| {
+                    ui.strong("Address");
+                });
+                h.col(|ui| {
+                    ui.strong("Machine Code");
+                });
+                h.col(|ui| {
+                    ui.strong("Source");
+                });
+            })
+            .body(|body| {
+                body.rows(18.0, rows.len(), |mut row| {
+                    let i = row.index();
+                    let (addr, word, src_line, ref label) = rows[i];
+                    let hot = current_pc == Some(addr);
+                    let bp = self.breakpoints.contains(&addr);
+                    let src = source_lines
+                        .get(src_line.saturating_sub(1) as usize)
+                        .copied()
+                        .unwrap_or("")
+                        .trim();
+
+                    // Indicator column: breakpoint dot (clickable) + PC arrow
+                    row.col(|ui| {
+                        let dot = RichText::new("⬤").small().color(if bp {
+                            egui::Color32::RED
+                        } else {
+                            egui::Color32::TRANSPARENT
+                        });
+                        if ui
+                            .add(egui::Label::new(dot).sense(egui::Sense::click()))
+                            .clicked()
+                        {
+                            if bp {
+                                self.breakpoints.remove(&addr);
+                            } else {
+                                self.breakpoints.insert(addr);
+                            }
+                        }
+                        if hot {
+                            ui.label(RichText::new("→").color(egui::Color32::YELLOW));
+                        }
+                    });
+
+                    // Label column
+                    row.col(|ui| {
+                        if let Some(lbl) = label {
+                            ui.label(
+                                RichText::new(lbl.as_str())
+                                    .monospace()
+                                    .color(egui::Color32::from_rgb(255, 200, 80)),
+                            );
+                        }
+                    });
+
+                    // Address
+                    row.col(|ui| {
+                        let t = RichText::new(format!("{addr:#010x}")).monospace();
+                        ui.label(if hot {
+                            t.color(egui::Color32::YELLOW)
+                        } else {
+                            t
+                        });
+                    });
+
+                    // Machine code
+                    row.col(|ui| {
+                        ui.label(RichText::new(format!("{word:#010x}")).monospace());
+                    });
+
+                    // Source
+                    row.col(|ui| {
+                        let t = RichText::new(src).monospace();
+                        let resp = ui.label(if hot {
+                            t.color(egui::Color32::YELLOW)
+                        } else {
+                            t
+                        });
+                        if hot {
+                            resp.scroll_to_me(None);
+                        }
+                    });
+                });
+            });
     }
 }
 
-// ─── Help content (free functions) ───────────────────────────────────────────
+// ─── Free helpers ────────────────────────────────────────────────────────────
+
+/// Extract a 1-based line number from error messages of the form "LINE:COL: …"
+fn parse_error_line(msg: &str) -> Option<u32> {
+    let s = msg.trim();
+    let colon = s.find(':')?;
+    s[..colon].parse::<u32>().ok()
+}
+
+// ─── Help content ─────────────────────────────────────────────────────────────
 
 fn instr_table(ui: &mut egui::Ui, id: &str, entries: &[(&str, &str, &str)]) {
     egui::Grid::new(id)
