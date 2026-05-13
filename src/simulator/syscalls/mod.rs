@@ -124,6 +124,29 @@ pub fn dispatch(
             regs.write(10, c);
         }
 
+        34 => {
+            // print_int (hex): a0 = value
+            let v = regs.read(10);
+            write!(stdout, "0x{v:08x}").ok();
+        }
+
+        35 => {
+            // print_int (binary): a0 = value
+            let v = regs.read(10);
+            write!(stdout, "0b{v:032b}").ok();
+        }
+
+        36 => {
+            // print_unsigned_int: a0 = value
+            let v = regs.read(10);
+            write!(stdout, "{v}").ok();
+        }
+
+        93 => {
+            // exit with code: a0 = exit code
+            return Ok(false);
+        }
+
         _ => {
             return Err(OarsError::Syscall {
                 number: num,
@@ -222,6 +245,19 @@ pub fn dispatch_gui(
             let c = line.chars().next().unwrap_or('\0') as u32;
             regs.write(10, c);
         }
+        34 => {
+            let v = regs.read(10);
+            console.push_str(&format!("0x{v:08x}"));
+        }
+        35 => {
+            let v = regs.read(10);
+            console.push_str(&format!("0b{v:032b}"));
+        }
+        36 => {
+            let v = regs.read(10);
+            console.push_str(&v.to_string());
+        }
+        93 => return Ok(GuiSyscallOutcome::Halt),
         _ => {
             return Err(OarsError::Syscall {
                 number: num,

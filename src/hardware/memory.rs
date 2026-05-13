@@ -10,6 +10,9 @@ pub const STACK_TOP: u32 = 0x7FFF_EFFC;
 pub struct Memory {
     data: HashMap<u32, u8>,
     heap_ptr: u32,
+    // Write journal for backstep: addr → value before first write this step.
+    journal: HashMap<u32, Option<u8>>,
+    journaling: bool,
 }
 
 impl Memory {
@@ -17,7 +20,36 @@ impl Memory {
         Self {
             data: HashMap::new(),
             heap_ptr: HEAP_BASE,
+            journal: HashMap::new(),
+            journaling: false,
         }
+    }
+
+    /// Start recording writes for one instruction's worth of undo data.
+    pub fn begin_journal(&mut self) {
+        self.journal.clear();
+        self.journaling = true;
+    }
+
+    /// Stop recording and return the undo list plus a snapshot of heap_ptr.
+    pub fn end_journal(&mut self) -> (Vec<(u32, Option<u8>)>, u32) {
+        self.journaling = false;
+        (self.journal.drain().collect(), self.heap_ptr)
+    }
+
+    /// Restore bytes written during a step (from a backstepper snapshot).
+    pub fn restore_mem_undo(&mut self, undo: &[(u32, Option<u8>)], heap_ptr: u32) {
+        for (addr, old) in undo {
+            match old {
+                None => {
+                    self.data.remove(addr);
+                }
+                Some(v) => {
+                    self.data.insert(*addr, *v);
+                }
+            }
+        }
+        self.heap_ptr = heap_ptr;
     }
 
     pub fn load_byte(&self, addr: u32) -> u8 {
@@ -36,6 +68,10 @@ impl Memory {
     }
 
     pub fn store_byte(&mut self, addr: u32, val: u8) {
+        if self.journaling && !self.journal.contains_key(&addr) {
+            let old = self.data.get(&addr).copied();
+            self.journal.insert(addr, old);
+        }
         self.data.insert(addr, val);
     }
 

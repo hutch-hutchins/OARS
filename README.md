@@ -118,6 +118,10 @@ main:
 | 10 | Exit | — | — |
 | 11 | Print character | `a0` = ASCII code | — |
 | 12 | Read character | — | `a0` |
+| 34 | Print integer (hex) | `a0` = value | — |
+| 35 | Print integer (binary) | `a0` = value | — |
+| 36 | Print unsigned integer | `a0` = value | — |
+| 93 | Exit with code | `a0` = exit code | — |
 
 ## ISA Coverage
 
@@ -184,11 +188,11 @@ Items are grouped by planned release. Checked items are complete and shipped.
 - [x] File open / save dialog (`.s` / `.asm` filter)
 - [x] GitHub Actions release builds (Windows, macOS ARM, Linux)
 
-### v0.3.0 — Completeness (planned)
+### v0.3.0 — Completeness ✓
 
-- [ ] Additional syscalls: 34 print hex, 35 print binary, 36 print unsigned, 93 exit with code
-- [ ] Full backstep — reverse memory writes in addition to register state
-- [ ] Watch panel — pin registers or memory addresses; values update on every step
+- [x] Additional syscalls: 34 print hex, 35 print binary, 36 print unsigned, 93 exit with code
+- [x] Full backstep — reverse memory writes in addition to register state
+- [x] Watch panel — pin registers or memory addresses; values update on every step
 
 ### v0.4.0 — Editor & UX Polish (planned)
 

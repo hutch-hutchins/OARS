@@ -50,6 +50,67 @@ enum RegisterTab {
     Integer,
     Float,
     Csr,
+    Watches,
+}
+
+// ─── Watch panel ─────────────────────────────────────────────────────────────
+
+#[derive(Clone)]
+enum WatchTarget {
+    IntReg(usize),
+    FpReg(usize),
+    Mem(u32),
+}
+
+#[derive(Clone)]
+struct Watch {
+    label: String,
+    target: WatchTarget,
+}
+
+fn parse_watch_target(input: &str) -> Option<WatchTarget> {
+    use crate::hardware::{fp_registers::FP_REG_NAMES, registers::REG_NAMES};
+    let s = input.trim().to_lowercase();
+    // Integer ABI name
+    for (i, name) in REG_NAMES.iter().enumerate() {
+        if s == *name {
+            return Some(WatchTarget::IntReg(i));
+        }
+    }
+    // x0–x31
+    if let Some(rest) = s.strip_prefix('x') {
+        if let Ok(n) = rest.parse::<usize>() {
+            if n < 32 {
+                return Some(WatchTarget::IntReg(n));
+            }
+        }
+    }
+    // FP ABI name
+    for (i, name) in FP_REG_NAMES.iter().enumerate() {
+        if s == *name {
+            return Some(WatchTarget::FpReg(i));
+        }
+    }
+    // f0–f31 (bare numeric, not an ABI alias)
+    if let Some(rest) = s.strip_prefix('f') {
+        if let Ok(n) = rest.parse::<usize>() {
+            if n < 32 {
+                return Some(WatchTarget::FpReg(n));
+            }
+        }
+    }
+    // Hex address
+    if let Some(hex) = s.strip_prefix("0x") {
+        let clean: String = hex.chars().filter(|&c| c != '_').collect();
+        if let Ok(addr) = u32::from_str_radix(&clean, 16) {
+            return Some(WatchTarget::Mem(addr));
+        }
+    }
+    // Decimal address
+    if let Ok(addr) = s.parse::<u32>() {
+        return Some(WatchTarget::Mem(addr));
+    }
+    None
 }
 
 // ─── App ─────────────────────────────────────────────────────────────────────
@@ -80,6 +141,9 @@ pub struct OarsApp {
     // Register snapshots for change highlighting
     prev_int_regs: [u32; 32],
     prev_fp_regs: [u64; 32],
+
+    watches: Vec<Watch>,
+    watch_input: String,
 
     show_help: bool,
 }
@@ -123,6 +187,8 @@ impl OarsApp {
             breakpoints: HashSet::new(),
             prev_int_regs: [0u32; 32],
             prev_fp_regs: [0u64; 32],
+            watches: Vec::new(),
+            watch_input: String::new(),
             show_help: false,
         }
     }
@@ -217,10 +283,16 @@ impl OarsApp {
 
     fn do_step(&mut self) {
         if let Some(ref mut cpu) = self.cpu {
-            self.prev_int_regs = cpu.regs.snapshot();
-            self.prev_fp_regs = cpu.fp.snapshot();
-            self.backstepper.push(cpu.pc, &cpu.regs, &cpu.fp);
+            let saved_pc = cpu.pc;
+            let saved_regs = cpu.regs.snapshot();
+            let saved_fp = cpu.fp.snapshot();
+            self.prev_int_regs = saved_regs;
+            self.prev_fp_regs = saved_fp;
+            cpu.mem.begin_journal();
             let outcome = engine::step_one(cpu, &mut self.console_out, &mut self.input_queue);
+            let (mem_undo, heap_ptr) = cpu.mem.end_journal();
+            self.backstepper
+                .push(saved_pc, saved_regs, saved_fp, mem_undo, heap_ptr);
             self.apply_outcome(outcome);
             if matches!(self.sim_state, SimState::Running) {
                 self.sim_state = SimState::Paused;
@@ -234,7 +306,7 @@ impl OarsApp {
             self.prev_fp_regs = cpu.fp.snapshot();
             if self
                 .backstepper
-                .pop(&mut cpu.pc, &mut cpu.regs, &mut cpu.fp)
+                .pop(&mut cpu.pc, &mut cpu.regs, &mut cpu.fp, &mut cpu.mem)
             {
                 self.sim_state = SimState::Paused;
             }
@@ -473,6 +545,7 @@ impl OarsApp {
             ui.selectable_value(&mut self.register_tab, RegisterTab::Integer, "Integer");
             ui.selectable_value(&mut self.register_tab, RegisterTab::Float, "Float");
             ui.selectable_value(&mut self.register_tab, RegisterTab::Csr, "CSR");
+            ui.selectable_value(&mut self.register_tab, RegisterTab::Watches, "Watches");
         });
         ui.separator();
 
@@ -590,7 +663,91 @@ impl OarsApp {
                             }
                         });
                 }
+                RegisterTab::Watches => {
+                    self.show_watches(ui);
+                }
             });
+    }
+
+    fn show_watches(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            let response = ui.add(
+                egui::TextEdit::singleline(&mut self.watch_input)
+                    .desired_width(130.0)
+                    .hint_text("a0, x5, fa0, 0x10010000"),
+            );
+            let add = ui.button("Add").clicked()
+                || (response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
+            if add {
+                let input = self.watch_input.trim().to_owned();
+                if !input.is_empty() {
+                    if let Some(target) = parse_watch_target(&input) {
+                        self.watches.push(Watch {
+                            label: input,
+                            target,
+                        });
+                        self.watch_input.clear();
+                    }
+                }
+            }
+        });
+        ui.separator();
+
+        if self.watches.is_empty() {
+            ui.weak("No watches. Enter a register (a0, x5, fa0) or address (0x10010000) above.");
+            return;
+        }
+
+        let mut to_remove: Option<usize> = None;
+        egui::Grid::new("watches")
+            .num_columns(4)
+            .spacing([6.0, 1.0])
+            .striped(true)
+            .show(ui, |ui| {
+                ui.weak("Name");
+                ui.weak("Hex");
+                ui.weak("Dec / Float");
+                ui.weak("");
+                ui.end_row();
+
+                for (i, watch) in self.watches.iter().enumerate() {
+                    let (hex_s, dec_s) = if let Some(cpu) = &self.cpu {
+                        match &watch.target {
+                            WatchTarget::IntReg(idx) => {
+                                let v = cpu.regs.read(*idx);
+                                (format!("{v:#010x}"), format!("{}", v as i32))
+                            }
+                            WatchTarget::FpReg(idx) => {
+                                let raw = cpu.fp.snapshot()[*idx];
+                                let f = f64::from_bits(raw);
+                                (format!("{raw:#018x}"), format!("{f:.6}"))
+                            }
+                            WatchTarget::Mem(addr) => {
+                                let v = cpu.mem.load_word(*addr);
+                                (format!("{v:#010x}"), format!("{}", v as i32))
+                            }
+                        }
+                    } else {
+                        ("—".to_owned(), "—".to_owned())
+                    };
+
+                    ui.label(
+                        RichText::new(&watch.label)
+                            .monospace()
+                            .color(egui::Color32::GRAY),
+                    );
+                    ui.label(RichText::new(hex_s).monospace());
+                    ui.label(RichText::new(dec_s).monospace());
+                    if ui.small_button("×").clicked() {
+                        to_remove = Some(i);
+                    }
+                    ui.end_row();
+                }
+            });
+
+        if let Some(i) = to_remove {
+            self.watches.remove(i);
+        }
     }
 
     fn show_console(&mut self, ui: &mut egui::Ui) {
