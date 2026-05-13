@@ -1,4 +1,5 @@
 pub mod app;
+mod highlighter;
 
 pub fn launch() -> ! {
     let options = eframe::NativeOptions {

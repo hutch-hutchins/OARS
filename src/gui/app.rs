@@ -11,7 +11,7 @@ use crate::assembler::{
 use crate::hardware::{
     csr::addr as csr_addr,
     fp_registers::FP_REG_NAMES,
-    memory::{DATA_BASE, STACK_TOP, TEXT_BASE},
+    memory::{DATA_BASE, HEAP_BASE, STACK_TOP, TEXT_BASE},
     registers::REG_NAMES,
 };
 use crate::simulator::{
@@ -41,6 +41,8 @@ enum MainTab {
 enum BottomTab {
     Console,
     Memory,
+    Data,
+    Stack,
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -415,7 +417,6 @@ impl OarsApp {
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "untitled.s".to_owned());
 
-        // Pull error line out of state so we can pass it into the layouter closure
         let error_line: Option<u32> = match &self.sim_state {
             SimState::Error(_, ln) => *ln,
             _ => None,
@@ -425,56 +426,45 @@ impl OarsApp {
         ui.separator();
 
         let source = &mut self.source;
+        let line_count = source.split('\n').count();
+
+        // Build the gutter (line numbers) text — fixed-width, right-aligned
+        let gutter_width = line_count.to_string().len();
+        let gutter_text: String = (1..=line_count)
+            .map(|n| format!("{n:>gutter_width$}\n"))
+            .collect();
+
         egui::ScrollArea::both()
             .id_salt("editor")
             .auto_shrink([false; 2])
             .show(ui, |ui| {
-                let mut layouter = |ui: &egui::Ui, text: &str, wrap_width: f32| {
-                    let mut job = egui::text::LayoutJob::default();
-                    job.wrap.max_width = wrap_width;
-                    for (i, line) in text.split('\n').enumerate() {
-                        let line_1based = (i + 1) as u32;
-                        let is_error = error_line == Some(line_1based);
-                        let bg = if is_error {
-                            egui::Color32::from_rgb(100, 20, 20)
-                        } else {
-                            egui::Color32::TRANSPARENT
-                        };
-                        let fg = if is_error {
-                            egui::Color32::from_rgb(255, 120, 120)
-                        } else {
-                            ui.visuals().text_color()
-                        };
-                        job.append(
-                            line,
-                            0.0,
-                            egui::TextFormat {
-                                font_id: egui::FontId::monospace(13.0),
-                                color: fg,
-                                background: bg,
-                                ..Default::default()
-                            },
-                        );
-                        // Re-add the newline (split removes it)
-                        if i + 1 < text.split('\n').count() {
-                            job.append(
-                                "\n",
-                                0.0,
-                                egui::TextFormat {
-                                    font_id: egui::FontId::monospace(13.0),
-                                    ..Default::default()
-                                },
-                            );
-                        }
-                    }
-                    ui.fonts(|f| f.layout_job(job))
-                };
-                ui.add(
-                    egui::TextEdit::multiline(source)
-                        .font(egui::TextStyle::Monospace)
-                        .desired_width(f32::INFINITY)
-                        .layouter(&mut layouter),
-                );
+                ui.horizontal_top(|ui| {
+                    // Gutter — non-interactive, same font, dim color
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(&gutter_text)
+                                .monospace()
+                                .size(13.0)
+                                .color(egui::Color32::from_rgb(80, 90, 100)),
+                        )
+                        .selectable(false),
+                    );
+
+                    ui.separator();
+
+                    // Editor with syntax highlighting
+                    let mut layouter = |_ui: &egui::Ui, text: &str, wrap_width: f32| {
+                        let mut job = super::highlighter::highlight(text, error_line);
+                        job.wrap.max_width = wrap_width;
+                        _ui.fonts(|f| f.layout_job(job))
+                    };
+                    ui.add(
+                        egui::TextEdit::multiline(source)
+                            .font(egui::TextStyle::Monospace)
+                            .desired_width(f32::INFINITY)
+                            .layouter(&mut layouter),
+                    );
+                });
             });
     }
 
@@ -749,6 +739,224 @@ impl OarsApp {
                 ui.label("Assemble first to view memory.");
             });
         }
+    }
+
+    fn show_data_segment(&mut self, ui: &mut egui::Ui) {
+        let Some(cpu) = &self.cpu else {
+            ui.centered_and_justified(|ui| {
+                ui.label("Assemble first to view the data segment.");
+            });
+            return;
+        };
+        let addr_to_labels = self
+            .asm_out
+            .as_ref()
+            .map(|a| &a.addr_to_labels)
+            .cloned()
+            .unwrap_or_default();
+
+        // Collect rows that have a label or non-zero content (DATA_BASE..HEAP_BASE)
+        const BYTES_PER_ROW: u32 = 16;
+        let mut display_rows: Vec<(u32, [u32; 4])> = Vec::new();
+        let mut addr = DATA_BASE;
+        while addr < HEAP_BASE {
+            let words: [u32; 4] = std::array::from_fn(|j| cpu.mem.load_word(addr + j as u32 * 4));
+            let has_label = addr_to_labels.contains_key(&addr)
+                || addr_to_labels.contains_key(&(addr + 4))
+                || addr_to_labels.contains_key(&(addr + 8))
+                || addr_to_labels.contains_key(&(addr + 12));
+            if has_label || words.iter().any(|&w| w != 0) {
+                display_rows.push((addr, words));
+            }
+            addr = addr.wrapping_add(BYTES_PER_ROW);
+        }
+
+        if display_rows.is_empty() {
+            ui.centered_and_justified(|ui| {
+                ui.label("Data segment is empty.");
+            });
+            return;
+        }
+
+        TableBuilder::new(ui)
+            .striped(true)
+            .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+            .column(Column::initial(100.0).resizable(true)) // Label
+            .column(Column::initial(110.0).resizable(true)) // Address
+            .column(Column::initial(88.0).resizable(true)) // +0
+            .column(Column::initial(88.0).resizable(true)) // +4
+            .column(Column::initial(88.0).resizable(true)) // +8
+            .column(Column::initial(88.0).resizable(true)) // +C
+            .column(Column::remainder()) // ASCII
+            .header(20.0, |mut h| {
+                h.col(|ui| {
+                    ui.strong("Label");
+                });
+                h.col(|ui| {
+                    ui.strong("Address");
+                });
+                h.col(|ui| {
+                    ui.strong("+0");
+                });
+                h.col(|ui| {
+                    ui.strong("+4");
+                });
+                h.col(|ui| {
+                    ui.strong("+8");
+                });
+                h.col(|ui| {
+                    ui.strong("+C");
+                });
+                h.col(|ui| {
+                    ui.strong("ASCII");
+                });
+            })
+            .body(|body| {
+                body.rows(18.0, display_rows.len(), |mut row| {
+                    let (row_addr, words) = display_rows[row.index()];
+                    // Collect all labels for any word in this row
+                    let row_labels: String = (0..4u32)
+                        .filter_map(|j| addr_to_labels.get(&(row_addr + j * 4)))
+                        .flat_map(|v| v.iter())
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(", ");
+
+                    row.col(|ui| {
+                        if !row_labels.is_empty() {
+                            ui.label(
+                                RichText::new(row_labels.as_str())
+                                    .monospace()
+                                    .color(egui::Color32::from_rgb(255, 200, 80)),
+                            );
+                        }
+                    });
+                    row.col(|ui| {
+                        ui.label(
+                            RichText::new(format!("{row_addr:#010x}"))
+                                .monospace()
+                                .color(egui::Color32::GRAY),
+                        );
+                    });
+                    for w in &words {
+                        row.col(|ui| {
+                            ui.label(RichText::new(format!("{w:#010x}")).monospace());
+                        });
+                    }
+                    row.col(|ui| {
+                        let ascii: String = (0..16u32)
+                            .map(|j| cpu.mem.load_byte(row_addr + j))
+                            .map(|b| {
+                                if (32..127).contains(&b) {
+                                    b as char
+                                } else {
+                                    '.'
+                                }
+                            })
+                            .collect();
+                        ui.label(RichText::new(ascii).monospace().weak());
+                    });
+                });
+            });
+    }
+
+    fn show_stack_viewer(&mut self, ui: &mut egui::Ui) {
+        let Some(cpu) = &self.cpu else {
+            ui.centered_and_justified(|ui| {
+                ui.label("Assemble first to view the stack.");
+            });
+            return;
+        };
+
+        let sp = cpu.regs.read(2); // x2 = sp
+
+        // Show 64 words above sp (already pushed) plus 16 words below (free space)
+        const WORD_ROWS: u32 = 80;
+        let view_top = STACK_TOP.saturating_sub((WORD_ROWS - 16) * 4);
+        let view_top = view_top & !0x3; // align to 4 bytes
+
+        TableBuilder::new(ui)
+            .striped(true)
+            .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+            .column(Column::initial(28.0).resizable(false)) // SP indicator
+            .column(Column::initial(110.0).resizable(true)) // Address
+            .column(Column::initial(110.0).resizable(true)) // Hex
+            .column(Column::initial(110.0).resizable(true)) // Decimal (signed)
+            .column(Column::remainder()) // Decimal (unsigned)
+            .header(20.0, |mut h| {
+                h.col(|_| {});
+                h.col(|ui| {
+                    ui.strong("Address");
+                });
+                h.col(|ui| {
+                    ui.strong("Hex");
+                });
+                h.col(|ui| {
+                    ui.strong("Signed");
+                });
+                h.col(|ui| {
+                    ui.strong("Unsigned");
+                });
+            })
+            .body(|body| {
+                body.rows(18.0, WORD_ROWS as usize, |mut row| {
+                    // Rows go from STACK_TOP down — row 0 is the top of stack
+                    let addr = STACK_TOP.wrapping_sub(row.index() as u32 * 4) & !0x3;
+                    if addr < view_top {
+                        row.col(|_| {});
+                        row.col(|_| {});
+                        row.col(|_| {});
+                        row.col(|_| {});
+                        row.col(|_| {});
+                        return;
+                    }
+                    let val = cpu.mem.load_word(addr);
+                    let is_sp = addr == sp;
+                    let used = addr >= sp; // pushed data is at sp..STACK_TOP
+                    let addr_color = if is_sp {
+                        egui::Color32::YELLOW
+                    } else if used {
+                        egui::Color32::WHITE
+                    } else {
+                        egui::Color32::DARK_GRAY
+                    };
+
+                    row.col(|ui| {
+                        if is_sp {
+                            ui.label(RichText::new("sp→").small().color(egui::Color32::YELLOW));
+                        }
+                    });
+                    row.col(|ui| {
+                        ui.label(
+                            RichText::new(format!("{addr:#010x}"))
+                                .monospace()
+                                .color(addr_color),
+                        );
+                    });
+                    row.col(|ui| {
+                        let t = RichText::new(format!("{val:#010x}")).monospace();
+                        ui.label(if is_sp {
+                            t.color(egui::Color32::YELLOW)
+                        } else {
+                            t
+                        });
+                    });
+                    row.col(|ui| {
+                        ui.label(
+                            RichText::new(format!("{}", val as i32))
+                                .monospace()
+                                .color(addr_color),
+                        );
+                    });
+                    row.col(|ui| {
+                        ui.label(
+                            RichText::new(format!("{val}"))
+                                .monospace()
+                                .color(addr_color),
+                        );
+                    });
+                });
+            });
     }
 
     fn show_text_segment(&mut self, ui: &mut egui::Ui) {
@@ -1549,7 +1757,7 @@ impl eframe::App for OarsApp {
             self.show_toolbar(ui);
         });
 
-        // Bottom panel: Console | Memory tabs
+        // Bottom panel: Console | Memory | Data | Stack tabs
         egui::TopBottomPanel::bottom("bottom_panel")
             .resizable(true)
             .default_height(200.0)
@@ -1557,11 +1765,15 @@ impl eframe::App for OarsApp {
                 ui.horizontal(|ui| {
                     ui.selectable_value(&mut self.bottom_tab, BottomTab::Console, "Console");
                     ui.selectable_value(&mut self.bottom_tab, BottomTab::Memory, "Memory");
+                    ui.selectable_value(&mut self.bottom_tab, BottomTab::Data, "Data Segment");
+                    ui.selectable_value(&mut self.bottom_tab, BottomTab::Stack, "Stack");
                 });
                 ui.separator();
                 match self.bottom_tab {
                     BottomTab::Console => self.show_console(ui),
                     BottomTab::Memory => self.show_memory_viewer(ui),
+                    BottomTab::Data => self.show_data_segment(ui),
+                    BottomTab::Stack => self.show_stack_viewer(ui),
                 }
             });
 
