@@ -79,8 +79,8 @@ struct Watch {
 
 #[derive(Clone)]
 struct AcEntry {
-    display: String,            // shown in the popup (e.g. "li rd, imm")
-    insert: String,             // inserted into the editor
+    display: String,                  // shown in the popup (e.g. "li rd, imm")
+    insert: String,                   // inserted into the editor
     first_ph: Option<(usize, usize)>, // byte range of first placeholder within `insert`
 }
 
@@ -676,7 +676,8 @@ impl Tab {
                 let entry = ac.candidates[ac.selected].clone();
                 let word_start = ac.word_start;
                 let word_end = ac.word_end.min(self.source.len());
-                self.source.replace_range(word_start..word_end, &entry.insert);
+                self.source
+                    .replace_range(word_start..word_end, &entry.insert);
                 if let Some((ph_start_b, ph_end_b)) = entry.first_ph {
                     let abs_start = (word_start + ph_start_b).min(self.source.len());
                     let abs_end = (word_start + ph_end_b).min(self.source.len());
@@ -736,31 +737,29 @@ impl Tab {
 
                     // Apply cursor selection from this-frame Tab-accept or previous click
                     if let Some((sel_start, sel_end)) = cursor_to_set.or(pending_cursor) {
-                        te_out.state.cursor.set_char_range(Some(
-                            egui::text::CCursorRange::two(
+                        te_out
+                            .state
+                            .cursor
+                            .set_char_range(Some(egui::text::CCursorRange::two(
                                 egui::text::CCursor::new(sel_start),
                                 egui::text::CCursor::new(sel_end),
-                            ),
-                        ));
+                            )));
                         te_out.state.store(ui.ctx(), te_out.response.id);
                         ui.ctx().request_repaint();
                     }
 
                     let force_open = te_out.response.has_focus()
-                        && ui.input(|i| {
-                            i.modifiers.ctrl && i.key_pressed(egui::Key::Space)
-                        });
+                        && ui.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::Space));
 
                     if te_out.response.changed() || force_open {
                         if let Some(cr) = te_out.cursor_range {
                             let byte_idx = cr.primary.ccursor.index;
                             let prefix = word_before_cursor(source, byte_idx).to_owned();
-                            let candidates =
-                                compute_completions(&prefix, source, byte_idx);
+                            let candidates = compute_completions(&prefix, source, byte_idx);
                             if !candidates.is_empty() {
                                 let cr_rect = te_out.galley.pos_from_cursor(&cr.primary);
-                                let anchor = te_out.galley_pos
-                                    + egui::vec2(cr_rect.min.x, cr_rect.max.y);
+                                let anchor =
+                                    te_out.galley_pos + egui::vec2(cr_rect.min.x, cr_rect.max.y);
                                 new_ac = Some(AcState {
                                     candidates,
                                     selected: 0,
@@ -785,54 +784,53 @@ impl Tab {
         }
 
         // ── Autocomplete popup overlay ────────────────────────────────────────
-        let click_result: Option<(usize, usize, AcEntry)> =
-            if let Some(ref ac) = self.ac {
-                let word_start = ac.word_start;
-                let word_end = ac.word_end;
-                let candidates = ac.candidates.clone();
-                let selected = ac.selected;
-                let anchor = ac.anchor;
+        let click_result: Option<(usize, usize, AcEntry)> = if let Some(ref ac) = self.ac {
+            let word_start = ac.word_start;
+            let word_end = ac.word_end;
+            let candidates = ac.candidates.clone();
+            let selected = ac.selected;
+            let anchor = ac.anchor;
 
-                let mut clicked_idx: Option<usize> = None;
-                egui::Area::new(egui::Id::new("ac_popup"))
-                    .fixed_pos(anchor)
-                    .order(egui::Order::Foreground)
-                    .show(&ctx, |ui| {
-                        egui::Frame::popup(ui.style()).show(ui, |ui| {
-                            ui.set_min_width(300.0);
-                            egui::ScrollArea::vertical()
-                                .max_height(240.0)
-                                .show(ui, |ui| {
-                                    ui.set_min_width(300.0);
-                                    for (i, entry) in candidates.iter().enumerate() {
-                                        let resp = ui.selectable_label(
-                                            i == selected,
-                                            RichText::new(entry.display.as_str()).monospace(),
-                                        );
-                                        if resp.clicked() {
-                                            clicked_idx = Some(i);
-                                        }
-                                        if i == selected {
-                                            resp.scroll_to_me(None);
-                                        }
+            let mut clicked_idx: Option<usize> = None;
+            egui::Area::new(egui::Id::new("ac_popup"))
+                .fixed_pos(anchor)
+                .order(egui::Order::Foreground)
+                .show(&ctx, |ui| {
+                    egui::Frame::popup(ui.style()).show(ui, |ui| {
+                        ui.set_min_width(300.0);
+                        egui::ScrollArea::vertical()
+                            .max_height(240.0)
+                            .show(ui, |ui| {
+                                ui.set_min_width(300.0);
+                                for (i, entry) in candidates.iter().enumerate() {
+                                    let resp = ui.selectable_label(
+                                        i == selected,
+                                        RichText::new(entry.display.as_str()).monospace(),
+                                    );
+                                    if resp.clicked() {
+                                        clicked_idx = Some(i);
                                     }
-                                });
-                            ui.separator();
-                            ui.add(
-                                egui::Label::new(
-                                    RichText::new("Enter/Tab accept  up/down navigate  Esc dismiss")
-                                        .small()
-                                        .weak(),
-                                )
-                                .wrap_mode(egui::TextWrapMode::Extend),
-                            );
-                        });
+                                    if i == selected {
+                                        resp.scroll_to_me(None);
+                                    }
+                                }
+                            });
+                        ui.separator();
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new("Enter/Tab accept  up/down navigate  Esc dismiss")
+                                    .small()
+                                    .weak(),
+                            )
+                            .wrap_mode(egui::TextWrapMode::Extend),
+                        );
                     });
+                });
 
-                clicked_idx.map(|idx| (word_start, word_end, candidates[idx].clone()))
-            } else {
-                None
-            };
+            clicked_idx.map(|idx| (word_start, word_end, candidates[idx].clone()))
+        } else {
+            None
+        };
 
         if let Some((start, end, entry)) = click_result {
             let safe_end = end.min(self.source.len());
@@ -1287,13 +1285,9 @@ impl Tab {
             .auto_shrink([false; 2])
             .show(ui, |ui| {
                 ui.label(
-                    RichText::new(format!(
-                        "→ {}  ({:#010x})",
-                        fn_name_at(cpu.pc),
-                        cpu.pc
-                    ))
-                    .monospace()
-                    .color(egui::Color32::YELLOW),
+                    RichText::new(format!("→ {}  ({:#010x})", fn_name_at(cpu.pc), cpu.pc))
+                        .monospace()
+                        .color(egui::Color32::YELLOW),
                 );
                 for &(call_site, _) in self.call_frames.iter().rev() {
                     ui.label(
@@ -1352,11 +1346,7 @@ impl Tab {
                                     .color(color),
                             );
                             if let Some(expr) = cond {
-                                ui.label(
-                                    RichText::new(format!("if {expr}"))
-                                        .monospace()
-                                        .weak(),
-                                );
+                                ui.label(RichText::new(format!("if {expr}")).monospace().weak());
                             } else {
                                 ui.label(RichText::new("(always)").weak());
                             }
@@ -2059,159 +2049,158 @@ fn parse_u32_val(s: &str) -> Option<u32> {
 // (mnemonic prefix, full syntax template shown in dropdown and inserted)
 const INSTRUCTION_TEMPLATES: &[(&str, &str)] = &[
     // Pseudo-instructions
-    ("li",     "li rd, imm"),
-    ("la",     "la rd, label"),
-    ("mv",     "mv rd, rs"),
-    ("not",    "not rd, rs"),
-    ("neg",    "neg rd, rs"),
-    ("nop",    "nop"),
-    ("j",      "j label"),
-    ("jr",     "jr rs"),
-    ("ret",    "ret"),
-    ("call",   "call label"),
-    ("beqz",   "beqz rs, label"),
-    ("bnez",   "bnez rs, label"),
-    ("blez",   "blez rs, label"),
-    ("bgez",   "bgez rs, label"),
-    ("bltz",   "bltz rs, label"),
-    ("bgtz",   "bgtz rs, label"),
-    ("bgt",    "bgt rs1, rs2, label"),
-    ("ble",    "ble rs1, rs2, label"),
-    ("bgtu",   "bgtu rs1, rs2, label"),
-    ("bleu",   "bleu rs1, rs2, label"),
-    ("seqz",   "seqz rd, rs"),
-    ("snez",   "snez rd, rs"),
-    ("sltz",   "sltz rd, rs"),
-    ("sgtz",   "sgtz rd, rs"),
-    ("fmv.s",  "fmv.s fd, fs"),
-    ("fmv.d",  "fmv.d fd, fs"),
+    ("li", "li rd, imm"),
+    ("la", "la rd, label"),
+    ("mv", "mv rd, rs"),
+    ("not", "not rd, rs"),
+    ("neg", "neg rd, rs"),
+    ("nop", "nop"),
+    ("j", "j label"),
+    ("jr", "jr rs"),
+    ("ret", "ret"),
+    ("call", "call label"),
+    ("beqz", "beqz rs, label"),
+    ("bnez", "bnez rs, label"),
+    ("blez", "blez rs, label"),
+    ("bgez", "bgez rs, label"),
+    ("bltz", "bltz rs, label"),
+    ("bgtz", "bgtz rs, label"),
+    ("bgt", "bgt rs1, rs2, label"),
+    ("ble", "ble rs1, rs2, label"),
+    ("bgtu", "bgtu rs1, rs2, label"),
+    ("bleu", "bleu rs1, rs2, label"),
+    ("seqz", "seqz rd, rs"),
+    ("snez", "snez rd, rs"),
+    ("sltz", "sltz rd, rs"),
+    ("sgtz", "sgtz rd, rs"),
+    ("fmv.s", "fmv.s fd, fs"),
+    ("fmv.d", "fmv.d fd, fs"),
     ("fabs.s", "fabs.s fd, fs"),
     ("fabs.d", "fabs.d fd, fs"),
     ("fneg.s", "fneg.s fd, fs"),
     ("fneg.d", "fneg.d fd, fs"),
-    ("csrr",   "csrr rd, csr"),
-    ("csrw",   "csrw csr, rs"),
-    ("csrs",   "csrs csr, rs"),
-    ("csrc",   "csrc csr, rs"),
-    ("csrwi",  "csrwi csr, imm"),
-    ("csrsi",  "csrsi csr, imm"),
-    ("csrci",  "csrci csr, imm"),
+    ("csrr", "csrr rd, csr"),
+    ("csrw", "csrw csr, rs"),
+    ("csrs", "csrs csr, rs"),
+    ("csrc", "csrc csr, rs"),
+    ("csrwi", "csrwi csr, imm"),
+    ("csrsi", "csrsi csr, imm"),
+    ("csrci", "csrci csr, imm"),
     // RV32I
-    ("add",    "add rd, rs1, rs2"),
-    ("sub",    "sub rd, rs1, rs2"),
-    ("sll",    "sll rd, rs1, rs2"),
-    ("slt",    "slt rd, rs1, rs2"),
-    ("sltu",   "sltu rd, rs1, rs2"),
-    ("xor",    "xor rd, rs1, rs2"),
-    ("srl",    "srl rd, rs1, rs2"),
-    ("sra",    "sra rd, rs1, rs2"),
-    ("or",     "or rd, rs1, rs2"),
-    ("and",    "and rd, rs1, rs2"),
-    ("addi",   "addi rd, rs1, imm"),
-    ("slti",   "slti rd, rs1, imm"),
-    ("sltiu",  "sltiu rd, rs1, imm"),
-    ("xori",   "xori rd, rs1, imm"),
-    ("ori",    "ori rd, rs1, imm"),
-    ("andi",   "andi rd, rs1, imm"),
-    ("slli",   "slli rd, rs1, shamt"),
-    ("srli",   "srli rd, rs1, shamt"),
-    ("srai",   "srai rd, rs1, shamt"),
-    ("lb",     "lb rd, off(rs1)"),
-    ("lh",     "lh rd, off(rs1)"),
-    ("lw",     "lw rd, off(rs1)"),
-    ("lbu",    "lbu rd, off(rs1)"),
-    ("lhu",    "lhu rd, off(rs1)"),
-    ("sb",     "sb rs2, off(rs1)"),
-    ("sh",     "sh rs2, off(rs1)"),
-    ("sw",     "sw rs2, off(rs1)"),
-    ("beq",    "beq rs1, rs2, label"),
-    ("bne",    "bne rs1, rs2, label"),
-    ("blt",    "blt rs1, rs2, label"),
-    ("bge",    "bge rs1, rs2, label"),
-    ("bltu",   "bltu rs1, rs2, label"),
-    ("bgeu",   "bgeu rs1, rs2, label"),
-    ("jal",    "jal rd, label"),
-    ("jalr",   "jalr rd, imm(rs1)"),
-    ("lui",    "lui rd, imm"),
-    ("auipc",  "auipc rd, imm"),
-    ("ecall",  "ecall"),
+    ("add", "add rd, rs1, rs2"),
+    ("sub", "sub rd, rs1, rs2"),
+    ("sll", "sll rd, rs1, rs2"),
+    ("slt", "slt rd, rs1, rs2"),
+    ("sltu", "sltu rd, rs1, rs2"),
+    ("xor", "xor rd, rs1, rs2"),
+    ("srl", "srl rd, rs1, rs2"),
+    ("sra", "sra rd, rs1, rs2"),
+    ("or", "or rd, rs1, rs2"),
+    ("and", "and rd, rs1, rs2"),
+    ("addi", "addi rd, rs1, imm"),
+    ("slti", "slti rd, rs1, imm"),
+    ("sltiu", "sltiu rd, rs1, imm"),
+    ("xori", "xori rd, rs1, imm"),
+    ("ori", "ori rd, rs1, imm"),
+    ("andi", "andi rd, rs1, imm"),
+    ("slli", "slli rd, rs1, shamt"),
+    ("srli", "srli rd, rs1, shamt"),
+    ("srai", "srai rd, rs1, shamt"),
+    ("lb", "lb rd, off(rs1)"),
+    ("lh", "lh rd, off(rs1)"),
+    ("lw", "lw rd, off(rs1)"),
+    ("lbu", "lbu rd, off(rs1)"),
+    ("lhu", "lhu rd, off(rs1)"),
+    ("sb", "sb rs2, off(rs1)"),
+    ("sh", "sh rs2, off(rs1)"),
+    ("sw", "sw rs2, off(rs1)"),
+    ("beq", "beq rs1, rs2, label"),
+    ("bne", "bne rs1, rs2, label"),
+    ("blt", "blt rs1, rs2, label"),
+    ("bge", "bge rs1, rs2, label"),
+    ("bltu", "bltu rs1, rs2, label"),
+    ("bgeu", "bgeu rs1, rs2, label"),
+    ("jal", "jal rd, label"),
+    ("jalr", "jalr rd, imm(rs1)"),
+    ("lui", "lui rd, imm"),
+    ("auipc", "auipc rd, imm"),
+    ("ecall", "ecall"),
     ("ebreak", "ebreak"),
     // RV32M
-    ("mul",    "mul rd, rs1, rs2"),
-    ("mulh",   "mulh rd, rs1, rs2"),
+    ("mul", "mul rd, rs1, rs2"),
+    ("mulh", "mulh rd, rs1, rs2"),
     ("mulhsu", "mulhsu rd, rs1, rs2"),
-    ("mulhu",  "mulhu rd, rs1, rs2"),
-    ("div",    "div rd, rs1, rs2"),
-    ("divu",   "divu rd, rs1, rs2"),
-    ("rem",    "rem rd, rs1, rs2"),
-    ("remu",   "remu rd, rs1, rs2"),
+    ("mulhu", "mulhu rd, rs1, rs2"),
+    ("div", "div rd, rs1, rs2"),
+    ("divu", "divu rd, rs1, rs2"),
+    ("rem", "rem rd, rs1, rs2"),
+    ("remu", "remu rd, rs1, rs2"),
     // RV32F
-    ("flw",      "flw fd, off(rs1)"),
-    ("fsw",      "fsw fs, off(rs1)"),
-    ("fadd.s",   "fadd.s fd, fs1, fs2"),
-    ("fsub.s",   "fsub.s fd, fs1, fs2"),
-    ("fmul.s",   "fmul.s fd, fs1, fs2"),
-    ("fdiv.s",   "fdiv.s fd, fs1, fs2"),
-    ("fsqrt.s",  "fsqrt.s fd, fs1"),
-    ("fmadd.s",  "fmadd.s fd, fs1, fs2, fs3"),
-    ("fmsub.s",  "fmsub.s fd, fs1, fs2, fs3"),
+    ("flw", "flw fd, off(rs1)"),
+    ("fsw", "fsw fs, off(rs1)"),
+    ("fadd.s", "fadd.s fd, fs1, fs2"),
+    ("fsub.s", "fsub.s fd, fs1, fs2"),
+    ("fmul.s", "fmul.s fd, fs1, fs2"),
+    ("fdiv.s", "fdiv.s fd, fs1, fs2"),
+    ("fsqrt.s", "fsqrt.s fd, fs1"),
+    ("fmadd.s", "fmadd.s fd, fs1, fs2, fs3"),
+    ("fmsub.s", "fmsub.s fd, fs1, fs2, fs3"),
     ("fnmsub.s", "fnmsub.s fd, fs1, fs2, fs3"),
     ("fnmadd.s", "fnmadd.s fd, fs1, fs2, fs3"),
-    ("fmin.s",   "fmin.s fd, fs1, fs2"),
-    ("fmax.s",   "fmax.s fd, fs1, fs2"),
-    ("fle.s",    "fle.s rd, fs1, fs2"),
-    ("flt.s",    "flt.s rd, fs1, fs2"),
-    ("feq.s",    "feq.s rd, fs1, fs2"),
+    ("fmin.s", "fmin.s fd, fs1, fs2"),
+    ("fmax.s", "fmax.s fd, fs1, fs2"),
+    ("fle.s", "fle.s rd, fs1, fs2"),
+    ("flt.s", "flt.s rd, fs1, fs2"),
+    ("feq.s", "feq.s rd, fs1, fs2"),
     ("fcvt.w.s", "fcvt.w.s rd, fs1"),
-    ("fcvt.wu.s","fcvt.wu.s rd, fs1"),
+    ("fcvt.wu.s", "fcvt.wu.s rd, fs1"),
     ("fcvt.s.w", "fcvt.s.w fd, rs1"),
-    ("fcvt.s.wu","fcvt.s.wu fd, rs1"),
-    ("fmv.x.w",  "fmv.x.w rd, fs1"),
-    ("fmv.w.x",  "fmv.w.x fd, rs1"),
+    ("fcvt.s.wu", "fcvt.s.wu fd, rs1"),
+    ("fmv.x.w", "fmv.x.w rd, fs1"),
+    ("fmv.w.x", "fmv.w.x fd, rs1"),
     ("fclass.s", "fclass.s rd, fs1"),
-    ("fsgnj.s",  "fsgnj.s fd, fs1, fs2"),
+    ("fsgnj.s", "fsgnj.s fd, fs1, fs2"),
     ("fsgnjn.s", "fsgnjn.s fd, fs1, fs2"),
     ("fsgnjx.s", "fsgnjx.s fd, fs1, fs2"),
     // RV32D
-    ("fld",      "fld fd, off(rs1)"),
-    ("fsd",      "fsd fs, off(rs1)"),
-    ("fadd.d",   "fadd.d fd, fs1, fs2"),
-    ("fsub.d",   "fsub.d fd, fs1, fs2"),
-    ("fmul.d",   "fmul.d fd, fs1, fs2"),
-    ("fdiv.d",   "fdiv.d fd, fs1, fs2"),
-    ("fsqrt.d",  "fsqrt.d fd, fs1"),
-    ("fmadd.d",  "fmadd.d fd, fs1, fs2, fs3"),
-    ("fmsub.d",  "fmsub.d fd, fs1, fs2, fs3"),
+    ("fld", "fld fd, off(rs1)"),
+    ("fsd", "fsd fs, off(rs1)"),
+    ("fadd.d", "fadd.d fd, fs1, fs2"),
+    ("fsub.d", "fsub.d fd, fs1, fs2"),
+    ("fmul.d", "fmul.d fd, fs1, fs2"),
+    ("fdiv.d", "fdiv.d fd, fs1, fs2"),
+    ("fsqrt.d", "fsqrt.d fd, fs1"),
+    ("fmadd.d", "fmadd.d fd, fs1, fs2, fs3"),
+    ("fmsub.d", "fmsub.d fd, fs1, fs2, fs3"),
     ("fnmsub.d", "fnmsub.d fd, fs1, fs2, fs3"),
     ("fnmadd.d", "fnmadd.d fd, fs1, fs2, fs3"),
-    ("fmin.d",   "fmin.d fd, fs1, fs2"),
-    ("fmax.d",   "fmax.d fd, fs1, fs2"),
-    ("fle.d",    "fle.d rd, fs1, fs2"),
-    ("flt.d",    "flt.d rd, fs1, fs2"),
-    ("feq.d",    "feq.d rd, fs1, fs2"),
+    ("fmin.d", "fmin.d fd, fs1, fs2"),
+    ("fmax.d", "fmax.d fd, fs1, fs2"),
+    ("fle.d", "fle.d rd, fs1, fs2"),
+    ("flt.d", "flt.d rd, fs1, fs2"),
+    ("feq.d", "feq.d rd, fs1, fs2"),
     ("fcvt.w.d", "fcvt.w.d rd, fs1"),
-    ("fcvt.wu.d","fcvt.wu.d rd, fs1"),
+    ("fcvt.wu.d", "fcvt.wu.d rd, fs1"),
     ("fcvt.d.w", "fcvt.d.w fd, rs1"),
-    ("fcvt.d.wu","fcvt.d.wu fd, rs1"),
+    ("fcvt.d.wu", "fcvt.d.wu fd, rs1"),
     ("fclass.d", "fclass.d rd, fs1"),
     ("fcvt.s.d", "fcvt.s.d fd, fs1"),
     ("fcvt.d.s", "fcvt.d.s fd, fs1"),
-    ("fsgnj.d",  "fsgnj.d fd, fs1, fs2"),
+    ("fsgnj.d", "fsgnj.d fd, fs1, fs2"),
     ("fsgnjn.d", "fsgnjn.d fd, fs1, fs2"),
     ("fsgnjx.d", "fsgnjx.d fd, fs1, fs2"),
     // Zicsr
-    ("csrrw",  "csrrw rd, csr, rs1"),
-    ("csrrs",  "csrrs rd, csr, rs1"),
-    ("csrrc",  "csrrc rd, csr, rs1"),
+    ("csrrw", "csrrw rd, csr, rs1"),
+    ("csrrs", "csrrs rd, csr, rs1"),
+    ("csrrc", "csrrc rd, csr, rs1"),
     ("csrrwi", "csrrwi rd, csr, imm"),
     ("csrrsi", "csrrsi rd, csr, imm"),
     ("csrrci", "csrrci rd, csr, imm"),
 ];
 
 const DIRECTIVES: &[&str] = &[
-    ".data", ".text", ".word", ".byte", ".half", ".short", ".float", ".double",
-    ".string", ".asciiz", ".asciz", ".ascii", ".space", ".align", ".globl", ".global",
-    ".equ", ".set",
+    ".data", ".text", ".word", ".byte", ".half", ".short", ".float", ".double", ".string",
+    ".asciiz", ".asciz", ".ascii", ".space", ".align", ".globl", ".global", ".equ", ".set",
 ];
 
 /// Return the byte offset of the first placeholder within `template`, e.g. for
@@ -2219,8 +2208,15 @@ const DIRECTIVES: &[&str] = &[
 fn first_placeholder_range(template: &str) -> Option<(usize, usize)> {
     let sp = template.find(' ')?;
     let start = sp + 1;
-    let end = template[start..].find(',').map(|i| start + i).unwrap_or(template.len());
-    if start < end { Some((start, end)) } else { None }
+    let end = template[start..]
+        .find(',')
+        .map(|i| start + i)
+        .unwrap_or(template.len());
+    if start < end {
+        Some((start, end))
+    } else {
+        None
+    }
 }
 
 /// True when the cursor is past the mnemonic on the current line (operand position).
@@ -2228,7 +2224,7 @@ fn is_operand_position(text: &str, cursor_byte: usize) -> bool {
     let before = &text[..cursor_byte.min(text.len())];
     let line_start = before.rfind('\n').map(|i| i + 1).unwrap_or(0);
     let line = &before[line_start..];
-    line.trim_start().contains(|c: char| c == ' ' || c == ',')
+    line.trim_start().contains([' ', ','])
 }
 
 /// Return the word prefix immediately before `cursor_byte` in `text`.
@@ -2253,7 +2249,11 @@ fn compute_completions(prefix: &str, source: &str, cursor_byte: usize) -> Vec<Ac
         let mut entries: Vec<AcEntry> = DIRECTIVES
             .iter()
             .filter(|&&d| d.to_lowercase().starts_with(&pl))
-            .map(|&d| AcEntry { display: d.to_owned(), insert: d.to_owned(), first_ph: None })
+            .map(|&d| AcEntry {
+                display: d.to_owned(),
+                insert: d.to_owned(),
+                first_ph: None,
+            })
             .collect();
         entries.sort_by(|a, b| a.display.cmp(&b.display));
         return entries;
@@ -2264,33 +2264,51 @@ fn compute_completions(prefix: &str, source: &str, cursor_byte: usize) -> Vec<Ac
         // Empty prefix: show the most-used ABI integer registers as a starting point
         if prefix.is_empty() {
             const COMMON: &[&str] = &[
-                "a0", "a1", "a2", "a3", "a4", "a5", "a6", "a7",
-                "t0", "t1", "t2", "t3", "t4", "t5", "t6",
-                "ra", "sp", "zero",
+                "a0", "a1", "a2", "a3", "a4", "a5", "a6", "a7", "t0", "t1", "t2", "t3", "t4", "t5",
+                "t6", "ra", "sp", "zero",
             ];
-            return COMMON.iter()
-                .map(|&n| AcEntry { display: n.to_owned(), insert: n.to_owned(), first_ph: None })
+            return COMMON
+                .iter()
+                .map(|&n| AcEntry {
+                    display: n.to_owned(),
+                    insert: n.to_owned(),
+                    first_ph: None,
+                })
                 .collect();
         }
         let mut seen: HashSet<String> = HashSet::new();
         let mut entries: Vec<AcEntry> = Vec::new();
         for name in crate::hardware::registers::REG_NAMES {
             if name.to_lowercase().starts_with(&pl) && seen.insert(name.to_string()) {
-                entries.push(AcEntry { display: name.to_string(), insert: name.to_string(), first_ph: None });
+                entries.push(AcEntry {
+                    display: name.to_string(),
+                    insert: name.to_string(),
+                    first_ph: None,
+                });
             }
         }
         for name in crate::hardware::fp_registers::FP_REG_NAMES {
             if name.to_lowercase().starts_with(&pl) && seen.insert(name.to_string()) {
-                entries.push(AcEntry { display: name.to_string(), insert: name.to_string(), first_ph: None });
+                entries.push(AcEntry {
+                    display: name.to_string(),
+                    insert: name.to_string(),
+                    first_ph: None,
+                });
             }
         }
         for line in source.lines() {
             if let Some(label) = line.trim().strip_suffix(':') {
                 let label = label.trim();
-                if !label.is_empty() && !label.contains(' ') && label.to_lowercase().starts_with(&pl) {
-                    if seen.insert(label.to_owned()) {
-                        entries.push(AcEntry { display: label.to_owned(), insert: label.to_owned(), first_ph: None });
-                    }
+                if !label.is_empty()
+                    && !label.contains(' ')
+                    && label.to_lowercase().starts_with(&pl)
+                    && seen.insert(label.to_owned())
+                {
+                    entries.push(AcEntry {
+                        display: label.to_owned(),
+                        insert: label.to_owned(),
+                        first_ph: None,
+                    });
                 }
             }
         }
@@ -3169,11 +3187,7 @@ impl eframe::App for OarsApp {
                         BottomTab::Watchpoints,
                         "Watchpoints",
                     );
-                    ui.selectable_value(
-                        &mut self.bottom_tab,
-                        BottomTab::CallStack,
-                        "Call Stack",
-                    );
+                    ui.selectable_value(&mut self.bottom_tab, BottomTab::CallStack, "Call Stack");
                     ui.selectable_value(
                         &mut self.bottom_tab,
                         BottomTab::Breakpoints,

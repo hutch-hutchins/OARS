@@ -31,23 +31,31 @@ Get the latest release from the **[Releases page](../../releases/latest)** and e
 ```text
 ┌─ Menu bar (File / Help) ───────────────────────────────────────────────┐
 ├─ Toolbar: Assemble | Run | Step | Step Over | Step Out | Backstep | Pause | Reset ─┤
-│                                                    │                   │
-│  ┌─ Editor ──── Text Segment ─────────────────┐  │  Integer           │
+│                                                   │                    │
+│  ┌─ Editor ──── Text Segment ─────────────────┐   │  Integer           │
 │  │                                             │  │  Float             │
 │  │   Centre panel — tabs switch between:       │  │  CSR               │
 │  │   • Editor: write and edit your .s file     │  │                    │
 │  │   • Text Segment: assembled instructions    │  │  (register panel,  │
 │  │     with address, machine code, and source  │  │   right side)      │
 │  │                                             │  │                    │
-│  └─────────────────────────────────────────────┘  │                   │
-│                                                    │                   │
+│  └─────────────────────────────────────────────┘  │                    │
+│                                                   │                    │
 │  ┌─ Console ──── Memory ───────────────────────────────────────────────┤
 │  │                                                                     │
 │  │   Bottom panel — tabs switch between:                               │
 │  │   • Console: program output and stdin input                         │
-│  │   • Memory: hex dump of memory with address, 4 words, ASCII        │
+│  │   • Memory: hex dump of memory with address, 4 words, ASCII         │
 │  └─────────────────────────────────────────────────────────────────────┘
 ```
+
+**Editor view** — write and debug your program with syntax highlighting, inline error markers, and live autocomplete:
+
+![OARS editor view](assets/OARS_MAIN.png)
+
+**Text Segment view** — see every assembled instruction with its address, machine code, and source line; click any row to set a breakpoint:
+
+![OARS text segment view](assets/OARS_TEXT.png)
 
 ### Toolbar buttons
 
