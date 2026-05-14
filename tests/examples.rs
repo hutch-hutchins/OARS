@@ -233,3 +233,13 @@ fn example_selection_sort() {
         "expected sorted output: {out:?}"
     );
 }
+
+// ── .equ constants: SIZE=8, sum 1..=8 = 36 ───────────────────────────────────
+
+#[test]
+fn example_constants() {
+    let (out, code) = run_example("constants.s");
+    assert_eq!(code, 0);
+    assert!(out.contains("SIZE = 8"), "missing SIZE: {out:?}");
+    assert!(out.contains("SUM  = 36"), "expected sum 36: {out:?}");
+}

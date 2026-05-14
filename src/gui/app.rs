@@ -1,4 +1,4 @@
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 
 use egui::RichText;
@@ -48,6 +48,8 @@ enum BottomTab {
     Data,
     Stack,
     Watchpoints,
+    CallStack,
+    Breakpoints,
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -73,11 +75,42 @@ struct Watch {
     target: WatchTarget,
 }
 
+// ─── Autocomplete state ───────────────────────────────────────────────────────
+
+#[derive(Clone)]
+struct AcEntry {
+    display: String,            // shown in the popup (e.g. "li rd, imm")
+    insert: String,             // inserted into the editor
+    first_ph: Option<(usize, usize)>, // byte range of first placeholder within `insert`
+}
+
+struct AcState {
+    candidates: Vec<AcEntry>,
+    selected: usize,
+    anchor: egui::Pos2,
+    word_start: usize, // byte offset of the typed prefix start in source
+    word_end: usize,   // byte offset of the cursor (end of typed prefix)
+}
+
 /// True if `word` is a call instruction (jal/jalr with rd = ra = x1).
 fn is_call_instr(word: u32) -> bool {
     let opc = word & 0x7F;
     let rd = (word >> 7) & 0x1F;
     (opc == 0x6F && rd == 1) || (opc == 0x67 && rd == 1 && ((word >> 12) & 0x7) == 0)
+}
+
+/// True if `word` is a return instruction (jalr x0, 0(x1)).
+fn is_ret_instr(word: u32) -> bool {
+    word == 0x0000_8067
+}
+
+/// Update call-frame tracking after executing the instruction at `pc`.
+fn update_call_stack_frames(frames: &mut Vec<(u32, u32)>, pc: u32, word: u32) {
+    if is_call_instr(word) {
+        frames.push((pc, pc + 4));
+    } else if is_ret_instr(word) {
+        frames.pop();
+    }
 }
 
 /// Parse a hex ("0x…") or decimal string into a u32 address.
@@ -142,9 +175,15 @@ struct Tab {
     console_out: String,
     input_buf: String,
     input_queue: VecDeque<String>,
-    breakpoints: HashSet<u32>,
+    // breakpoints: address → optional condition expression (None = unconditional)
+    breakpoints: HashMap<u32, Option<String>>,
     watchpoint_addrs: HashSet<u32>,
     watchpoint_input: String,
+    // Call stack: (call_site_pc, return_addr) pairs, innermost last
+    call_frames: Vec<(u32, u32)>,
+    // Conditional breakpoint editor inputs
+    bp_cond_addr_input: String,
+    bp_cond_expr_input: String,
     prev_int_regs: [u32; 32],
     prev_fp_regs: [u64; 32],
     main_tab: MainTab,
@@ -153,6 +192,10 @@ struct Tab {
     find_query: String,
     replace_query: String,
     find_case_sensitive: bool,
+    // Editor autocomplete
+    ac: Option<AcState>,
+    // Char indices [start, end] to select in the editor on the next frame
+    pending_cursor: Option<(usize, usize)>,
 }
 
 impl Tab {
@@ -167,9 +210,12 @@ impl Tab {
             console_out: String::new(),
             input_buf: String::new(),
             input_queue: VecDeque::new(),
-            breakpoints: HashSet::new(),
+            breakpoints: HashMap::new(),
             watchpoint_addrs: HashSet::new(),
             watchpoint_input: String::new(),
+            call_frames: Vec::new(),
+            bp_cond_addr_input: String::new(),
+            bp_cond_expr_input: String::new(),
             prev_int_regs: [0u32; 32],
             prev_fp_regs: [0u64; 32],
             main_tab: MainTab::Editor,
@@ -177,6 +223,8 @@ impl Tab {
             find_query: String::new(),
             replace_query: String::new(),
             find_case_sensitive: false,
+            ac: None,
+            pending_cursor: None,
         }
     }
 
@@ -316,6 +364,7 @@ impl Tab {
             let saved_fp = cpu.fp.snapshot();
             self.prev_int_regs = saved_regs;
             self.prev_fp_regs = saved_fp;
+            let instr_word = cpu.mem.load_word(saved_pc);
             cpu.mem.begin_journal();
             let outcome = engine::step_one(cpu, &mut self.console_out, &mut self.input_queue);
             let (mem_undo, heap_ptr) = cpu.mem.end_journal();
@@ -331,6 +380,7 @@ impl Tab {
                     self.sim_state = SimState::WatchpointHit(addr);
                 }
             }
+            update_call_stack_frames(&mut self.call_frames, saved_pc, instr_word);
         }
     }
 
@@ -388,6 +438,8 @@ impl Tab {
         self.console_out.clear();
         self.input_queue.clear();
         self.input_buf.clear();
+        self.call_frames.clear();
+        self.ac = None;
         self.clear_prev_regs();
     }
 
@@ -403,18 +455,36 @@ impl Tab {
                 SimState::StepOver(t) | SimState::StepOut(t) => Some(t),
                 _ => None,
             };
-            if let Some(ref cpu) = self.cpu {
+
+            // Check stop conditions and capture pre-step info
+            let (should_stop, saved_pc, instr_word) = if let Some(ref cpu) = self.cpu {
+                let mut stop = false;
                 if let Some(target) = target_pc {
                     if cpu.pc == target {
-                        self.sim_state = SimState::Paused;
-                        return;
+                        stop = true;
                     }
                 }
-                if self.breakpoints.contains(&cpu.pc) {
-                    self.sim_state = SimState::Paused;
-                    return;
+                if !stop {
+                    if let Some(cond) = self.breakpoints.get(&cpu.pc) {
+                        let hit = match cond {
+                            None => true,
+                            Some(expr) => eval_condition(expr, cpu),
+                        };
+                        if hit {
+                            stop = true;
+                        }
+                    }
                 }
+                (stop, cpu.pc, cpu.mem.load_word(cpu.pc))
+            } else {
+                (false, 0, 0)
+            };
+
+            if should_stop {
+                self.sim_state = SimState::Paused;
+                return;
             }
+
             if let Some(ref mut cpu) = self.cpu {
                 let outcome = engine::step_one(cpu, &mut self.console_out, &mut self.input_queue);
                 let wp_hit = cpu.mem.take_watchpoint_hit();
@@ -429,6 +499,8 @@ impl Tab {
                 self.sim_state = SimState::Idle;
                 return;
             }
+
+            update_call_stack_frames(&mut self.call_frames, saved_pc, instr_word);
         }
     }
 
@@ -500,11 +572,12 @@ impl Tab {
             _ => None,
         };
 
-        // Ctrl+F opens find bar; Escape closes it
+        // Ctrl+F opens find bar
         if ui.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::F)) {
             self.show_find = true;
         }
-        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+        // Escape: close autocomplete first, then find bar
+        if self.ac.is_none() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.show_find = false;
         }
 
@@ -546,13 +619,90 @@ impl Tab {
             ui.separator();
         }
 
+        // ── Autocomplete keyboard handling (must happen before TextEdit renders) ─
+        let mut ac_nav: i32 = 0;
+        let mut ac_accept = false;
+        let mut ac_dismiss = false;
+        if self.ac.is_some() {
+            ui.input_mut(|i| {
+                i.events.retain(|e| match e {
+                    egui::Event::Key {
+                        key: egui::Key::ArrowDown,
+                        pressed: true,
+                        ..
+                    } => {
+                        ac_nav += 1;
+                        false
+                    }
+                    egui::Event::Key {
+                        key: egui::Key::ArrowUp,
+                        pressed: true,
+                        ..
+                    } => {
+                        ac_nav -= 1;
+                        false
+                    }
+                    egui::Event::Key {
+                        key: egui::Key::Escape,
+                        pressed: true,
+                        ..
+                    } => {
+                        ac_dismiss = true;
+                        false
+                    }
+                    egui::Event::Key {
+                        key: egui::Key::Tab | egui::Key::Enter,
+                        pressed: true,
+                        ..
+                    } => {
+                        ac_accept = true;
+                        false
+                    }
+                    _ => true,
+                });
+            });
+        }
+        // Apply navigation
+        if ac_nav != 0 {
+            if let Some(ref mut ac) = self.ac {
+                let n = ac.candidates.len() as i32;
+                ac.selected = ((ac.selected as i32 + ac_nav).rem_euclid(n)) as usize;
+            }
+        }
+        // Apply accepted completion to source before TextEdit renders so it sees the result
+        let mut cursor_to_set: Option<(usize, usize)> = None;
+        if ac_accept {
+            if let Some(ref ac) = self.ac {
+                let entry = ac.candidates[ac.selected].clone();
+                let word_start = ac.word_start;
+                let word_end = ac.word_end.min(self.source.len());
+                self.source.replace_range(word_start..word_end, &entry.insert);
+                if let Some((ph_start_b, ph_end_b)) = entry.first_ph {
+                    let abs_start = (word_start + ph_start_b).min(self.source.len());
+                    let abs_end = (word_start + ph_end_b).min(self.source.len());
+                    cursor_to_set = Some((
+                        self.source[..abs_start].chars().count(),
+                        self.source[..abs_end].chars().count(),
+                    ));
+                }
+            }
+            self.ac = None;
+        } else if ac_dismiss {
+            self.ac = None;
+        }
+        let pending_cursor = self.pending_cursor.take();
+
+        // ── Editor ────────────────────────────────────────────────────────────
+        let ctx = ui.ctx().clone();
         let source = &mut self.source;
         let line_count = source.split('\n').count();
-
         let gutter_width = line_count.to_string().len();
         let gutter_text: String = (1..=line_count)
             .map(|n| format!("{n:>gutter_width$}\n"))
             .collect();
+
+        let mut new_ac: Option<AcState> = None;
+        let mut dismiss_ac = false;
 
         egui::ScrollArea::both()
             .id_salt("editor")
@@ -576,14 +726,127 @@ impl Tab {
                         job.wrap.max_width = wrap_width;
                         _ui.fonts(|f| f.layout_job(job))
                     };
-                    ui.add(
-                        egui::TextEdit::multiline(source)
-                            .font(egui::TextStyle::Monospace)
-                            .desired_width(f32::INFINITY)
-                            .layouter(&mut layouter),
-                    );
+
+                    let mut te_out = egui::TextEdit::multiline(source)
+                        .font(egui::TextStyle::Monospace)
+                        .desired_width(f32::INFINITY)
+                        .lock_focus(true)
+                        .layouter(&mut layouter)
+                        .show(ui);
+
+                    // Apply cursor selection from this-frame Tab-accept or previous click
+                    if let Some((sel_start, sel_end)) = cursor_to_set.or(pending_cursor) {
+                        te_out.state.cursor.set_char_range(Some(
+                            egui::text::CCursorRange::two(
+                                egui::text::CCursor::new(sel_start),
+                                egui::text::CCursor::new(sel_end),
+                            ),
+                        ));
+                        te_out.state.store(ui.ctx(), te_out.response.id);
+                        ui.ctx().request_repaint();
+                    }
+
+                    let force_open = te_out.response.has_focus()
+                        && ui.input(|i| {
+                            i.modifiers.ctrl && i.key_pressed(egui::Key::Space)
+                        });
+
+                    if te_out.response.changed() || force_open {
+                        if let Some(cr) = te_out.cursor_range {
+                            let byte_idx = cr.primary.ccursor.index;
+                            let prefix = word_before_cursor(source, byte_idx).to_owned();
+                            let candidates =
+                                compute_completions(&prefix, source, byte_idx);
+                            if !candidates.is_empty() {
+                                let cr_rect = te_out.galley.pos_from_cursor(&cr.primary);
+                                let anchor = te_out.galley_pos
+                                    + egui::vec2(cr_rect.min.x, cr_rect.max.y);
+                                new_ac = Some(AcState {
+                                    candidates,
+                                    selected: 0,
+                                    anchor,
+                                    word_start: byte_idx.saturating_sub(prefix.len()),
+                                    word_end: byte_idx,
+                                });
+                            } else {
+                                dismiss_ac = true;
+                            }
+                        }
+                    } else if !te_out.response.has_focus() {
+                        dismiss_ac = true;
+                    }
                 });
             });
+
+        if let Some(ac) = new_ac {
+            self.ac = Some(ac);
+        } else if dismiss_ac {
+            self.ac = None;
+        }
+
+        // ── Autocomplete popup overlay ────────────────────────────────────────
+        let click_result: Option<(usize, usize, AcEntry)> =
+            if let Some(ref ac) = self.ac {
+                let word_start = ac.word_start;
+                let word_end = ac.word_end;
+                let candidates = ac.candidates.clone();
+                let selected = ac.selected;
+                let anchor = ac.anchor;
+
+                let mut clicked_idx: Option<usize> = None;
+                egui::Area::new(egui::Id::new("ac_popup"))
+                    .fixed_pos(anchor)
+                    .order(egui::Order::Foreground)
+                    .show(&ctx, |ui| {
+                        egui::Frame::popup(ui.style()).show(ui, |ui| {
+                            ui.set_min_width(300.0);
+                            egui::ScrollArea::vertical()
+                                .max_height(240.0)
+                                .show(ui, |ui| {
+                                    ui.set_min_width(300.0);
+                                    for (i, entry) in candidates.iter().enumerate() {
+                                        let resp = ui.selectable_label(
+                                            i == selected,
+                                            RichText::new(entry.display.as_str()).monospace(),
+                                        );
+                                        if resp.clicked() {
+                                            clicked_idx = Some(i);
+                                        }
+                                        if i == selected {
+                                            resp.scroll_to_me(None);
+                                        }
+                                    }
+                                });
+                            ui.separator();
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new("Enter/Tab accept  up/down navigate  Esc dismiss")
+                                        .small()
+                                        .weak(),
+                                )
+                                .wrap_mode(egui::TextWrapMode::Extend),
+                            );
+                        });
+                    });
+
+                clicked_idx.map(|idx| (word_start, word_end, candidates[idx].clone()))
+            } else {
+                None
+            };
+
+        if let Some((start, end, entry)) = click_result {
+            let safe_end = end.min(self.source.len());
+            self.source.replace_range(start..safe_end, &entry.insert);
+            if let Some((ph_start_b, ph_end_b)) = entry.first_ph {
+                let abs_start = (start + ph_start_b).min(self.source.len());
+                let abs_end = (start + ph_end_b).min(self.source.len());
+                self.pending_cursor = Some((
+                    self.source[..abs_start].chars().count(),
+                    self.source[..abs_end].chars().count(),
+                ));
+            }
+            self.ac = None;
+        }
     }
 
     fn show_console(&mut self, ui: &mut egui::Ui) {
@@ -929,7 +1192,7 @@ impl Tab {
                     let i = row.index();
                     let (addr, word, src_line, ref label) = rows[i];
                     let hot = current_pc == Some(addr);
-                    let bp = self.breakpoints.contains(&addr);
+                    let bp = self.breakpoints.contains_key(&addr);
                     let src = source_lines
                         .get(src_line.saturating_sub(1) as usize)
                         .copied()
@@ -949,7 +1212,7 @@ impl Tab {
                             if bp {
                                 self.breakpoints.remove(&addr);
                             } else {
-                                self.breakpoints.insert(addr);
+                                self.breakpoints.insert(addr, None);
                             }
                         }
                         if hot {
@@ -993,6 +1256,144 @@ impl Tab {
                     });
                 });
             });
+    }
+
+    fn show_call_stack(&self, ui: &mut egui::Ui) {
+        let Some(cpu) = &self.cpu else {
+            ui.centered_and_justified(|ui| {
+                ui.label("Assemble first to see the call stack.");
+            });
+            return;
+        };
+
+        let addr_to_labels = self
+            .asm_out
+            .as_ref()
+            .map(|a| a.addr_to_labels.clone())
+            .unwrap_or_default();
+
+        // Find the nearest label at or before `addr`.
+        let fn_name_at = |addr: u32| -> String {
+            addr_to_labels
+                .iter()
+                .filter(|(&a, _)| a <= addr)
+                .max_by_key(|(&a, _)| a)
+                .and_then(|(_, labels)| labels.first().cloned())
+                .unwrap_or_else(|| format!("{addr:#010x}"))
+        };
+
+        egui::ScrollArea::vertical()
+            .id_salt("call_stack_scroll")
+            .auto_shrink([false; 2])
+            .show(ui, |ui| {
+                ui.label(
+                    RichText::new(format!(
+                        "→ {}  ({:#010x})",
+                        fn_name_at(cpu.pc),
+                        cpu.pc
+                    ))
+                    .monospace()
+                    .color(egui::Color32::YELLOW),
+                );
+                for &(call_site, _) in self.call_frames.iter().rev() {
+                    ui.label(
+                        RichText::new(format!(
+                            "  ← {}  ({:#010x})",
+                            fn_name_at(call_site),
+                            call_site
+                        ))
+                        .monospace()
+                        .weak(),
+                    );
+                }
+                if self.call_frames.is_empty() {
+                    ui.add_space(4.0);
+                    ui.label(
+                        RichText::new("No calls traced yet. Step or run to build the stack.")
+                            .weak()
+                            .small(),
+                    );
+                }
+            });
+    }
+
+    fn show_breakpoints(&mut self, ui: &mut egui::Ui) {
+        ui.label(
+            RichText::new(
+                "Click ⬤ in the Text Segment to toggle breakpoints. \
+                 Add an optional condition below.",
+            )
+            .weak()
+            .small(),
+        );
+        ui.separator();
+
+        if self.breakpoints.is_empty() {
+            ui.label(RichText::new("No breakpoints set.").weak());
+        } else {
+            let mut to_remove: Option<u32> = None;
+            let addrs: Vec<u32> = {
+                let mut v: Vec<u32> = self.breakpoints.keys().copied().collect();
+                v.sort();
+                v
+            };
+            egui::ScrollArea::vertical()
+                .id_salt("bp_scroll")
+                .max_height(120.0)
+                .auto_shrink([false; 2])
+                .show(ui, |ui| {
+                    for addr in addrs {
+                        let cond = self.breakpoints.get(&addr).cloned().flatten();
+                        ui.horizontal(|ui| {
+                            let color = ui.visuals().text_color();
+                            ui.label(
+                                RichText::new(format!("{addr:#010x}"))
+                                    .monospace()
+                                    .color(color),
+                            );
+                            if let Some(expr) = cond {
+                                ui.label(
+                                    RichText::new(format!("if {expr}"))
+                                        .monospace()
+                                        .weak(),
+                                );
+                            } else {
+                                ui.label(RichText::new("(always)").weak());
+                            }
+                            if ui.small_button("×").clicked() {
+                                to_remove = Some(addr);
+                            }
+                        });
+                    }
+                });
+            if let Some(addr) = to_remove {
+                self.breakpoints.remove(&addr);
+            }
+        }
+
+        ui.separator();
+        ui.label(RichText::new("Set / edit condition:").small());
+        ui.horizontal(|ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut self.bp_cond_addr_input)
+                    .desired_width(120.0)
+                    .hint_text("PC  e.g. 0x00400010"),
+            );
+            ui.add(
+                egui::TextEdit::singleline(&mut self.bp_cond_expr_input)
+                    .desired_width(200.0)
+                    .hint_text("condition  e.g. a0 == 5  (blank = always)"),
+            );
+            if ui.button("Set").clicked() && !self.bp_cond_addr_input.is_empty() {
+                if let Some(addr) = parse_addr(&self.bp_cond_addr_input) {
+                    let expr = self.bp_cond_expr_input.trim().to_owned();
+                    let cond = if expr.is_empty() { None } else { Some(expr) };
+                    self.breakpoints.insert(addr, cond);
+                    self.bp_cond_addr_input.clear();
+                    self.bp_cond_expr_input.clear();
+                }
+            }
+        });
     }
 
     fn show_watchpoints(&mut self, ui: &mut egui::Ui) {
@@ -1600,6 +2001,316 @@ impl OarsApp {
 }
 
 // ─── Free helpers ─────────────────────────────────────────────────────────────
+
+/// Evaluate a simple register-comparison condition string against the current CPU.
+/// Syntax: `REG OP VALUE` where OP is `==`, `!=`, `<`, `>`, `<=`, `>=`.
+/// Returns `true` (break) for empty or malformed conditions.
+fn eval_condition(expr: &str, cpu: &crate::simulator::engine::CpuState) -> bool {
+    for op in &["==", "!=", "<=", ">=", "<", ">"] {
+        if let Some(pos) = expr.find(op) {
+            let lhs = expr[..pos].trim();
+            let rhs = expr[pos + op.len()..].trim();
+            if let (Some(l), Some(r)) = (read_reg_val(lhs, cpu), parse_u32_val(rhs)) {
+                return match *op {
+                    "==" => l == r,
+                    "!=" => l != r,
+                    "<" => (l as i32) < (r as i32),
+                    ">" => (l as i32) > (r as i32),
+                    "<=" => (l as i32) <= (r as i32),
+                    ">=" => (l as i32) >= (r as i32),
+                    _ => true,
+                };
+            }
+        }
+    }
+    true
+}
+
+fn read_reg_val(s: &str, cpu: &crate::simulator::engine::CpuState) -> Option<u32> {
+    use crate::hardware::registers::REG_NAMES;
+    let s = s.trim().to_lowercase();
+    for (i, name) in REG_NAMES.iter().enumerate() {
+        if s == *name {
+            return Some(cpu.regs.read(i));
+        }
+    }
+    if let Some(rest) = s.strip_prefix('x') {
+        if let Ok(n) = rest.parse::<usize>() {
+            if n < 32 {
+                return Some(cpu.regs.read(n));
+            }
+        }
+    }
+    parse_u32_val(&s)
+}
+
+fn parse_u32_val(s: &str) -> Option<u32> {
+    let s = s.trim();
+    if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+        let clean: String = hex.chars().filter(|&c| c != '_').collect();
+        u32::from_str_radix(&clean, 16).ok()
+    } else {
+        s.parse::<i32>().ok().map(|v| v as u32)
+    }
+}
+
+// ─── Autocomplete helpers ─────────────────────────────────────────────────────
+
+// (mnemonic prefix, full syntax template shown in dropdown and inserted)
+const INSTRUCTION_TEMPLATES: &[(&str, &str)] = &[
+    // Pseudo-instructions
+    ("li",     "li rd, imm"),
+    ("la",     "la rd, label"),
+    ("mv",     "mv rd, rs"),
+    ("not",    "not rd, rs"),
+    ("neg",    "neg rd, rs"),
+    ("nop",    "nop"),
+    ("j",      "j label"),
+    ("jr",     "jr rs"),
+    ("ret",    "ret"),
+    ("call",   "call label"),
+    ("beqz",   "beqz rs, label"),
+    ("bnez",   "bnez rs, label"),
+    ("blez",   "blez rs, label"),
+    ("bgez",   "bgez rs, label"),
+    ("bltz",   "bltz rs, label"),
+    ("bgtz",   "bgtz rs, label"),
+    ("bgt",    "bgt rs1, rs2, label"),
+    ("ble",    "ble rs1, rs2, label"),
+    ("bgtu",   "bgtu rs1, rs2, label"),
+    ("bleu",   "bleu rs1, rs2, label"),
+    ("seqz",   "seqz rd, rs"),
+    ("snez",   "snez rd, rs"),
+    ("sltz",   "sltz rd, rs"),
+    ("sgtz",   "sgtz rd, rs"),
+    ("fmv.s",  "fmv.s fd, fs"),
+    ("fmv.d",  "fmv.d fd, fs"),
+    ("fabs.s", "fabs.s fd, fs"),
+    ("fabs.d", "fabs.d fd, fs"),
+    ("fneg.s", "fneg.s fd, fs"),
+    ("fneg.d", "fneg.d fd, fs"),
+    ("csrr",   "csrr rd, csr"),
+    ("csrw",   "csrw csr, rs"),
+    ("csrs",   "csrs csr, rs"),
+    ("csrc",   "csrc csr, rs"),
+    ("csrwi",  "csrwi csr, imm"),
+    ("csrsi",  "csrsi csr, imm"),
+    ("csrci",  "csrci csr, imm"),
+    // RV32I
+    ("add",    "add rd, rs1, rs2"),
+    ("sub",    "sub rd, rs1, rs2"),
+    ("sll",    "sll rd, rs1, rs2"),
+    ("slt",    "slt rd, rs1, rs2"),
+    ("sltu",   "sltu rd, rs1, rs2"),
+    ("xor",    "xor rd, rs1, rs2"),
+    ("srl",    "srl rd, rs1, rs2"),
+    ("sra",    "sra rd, rs1, rs2"),
+    ("or",     "or rd, rs1, rs2"),
+    ("and",    "and rd, rs1, rs2"),
+    ("addi",   "addi rd, rs1, imm"),
+    ("slti",   "slti rd, rs1, imm"),
+    ("sltiu",  "sltiu rd, rs1, imm"),
+    ("xori",   "xori rd, rs1, imm"),
+    ("ori",    "ori rd, rs1, imm"),
+    ("andi",   "andi rd, rs1, imm"),
+    ("slli",   "slli rd, rs1, shamt"),
+    ("srli",   "srli rd, rs1, shamt"),
+    ("srai",   "srai rd, rs1, shamt"),
+    ("lb",     "lb rd, off(rs1)"),
+    ("lh",     "lh rd, off(rs1)"),
+    ("lw",     "lw rd, off(rs1)"),
+    ("lbu",    "lbu rd, off(rs1)"),
+    ("lhu",    "lhu rd, off(rs1)"),
+    ("sb",     "sb rs2, off(rs1)"),
+    ("sh",     "sh rs2, off(rs1)"),
+    ("sw",     "sw rs2, off(rs1)"),
+    ("beq",    "beq rs1, rs2, label"),
+    ("bne",    "bne rs1, rs2, label"),
+    ("blt",    "blt rs1, rs2, label"),
+    ("bge",    "bge rs1, rs2, label"),
+    ("bltu",   "bltu rs1, rs2, label"),
+    ("bgeu",   "bgeu rs1, rs2, label"),
+    ("jal",    "jal rd, label"),
+    ("jalr",   "jalr rd, imm(rs1)"),
+    ("lui",    "lui rd, imm"),
+    ("auipc",  "auipc rd, imm"),
+    ("ecall",  "ecall"),
+    ("ebreak", "ebreak"),
+    // RV32M
+    ("mul",    "mul rd, rs1, rs2"),
+    ("mulh",   "mulh rd, rs1, rs2"),
+    ("mulhsu", "mulhsu rd, rs1, rs2"),
+    ("mulhu",  "mulhu rd, rs1, rs2"),
+    ("div",    "div rd, rs1, rs2"),
+    ("divu",   "divu rd, rs1, rs2"),
+    ("rem",    "rem rd, rs1, rs2"),
+    ("remu",   "remu rd, rs1, rs2"),
+    // RV32F
+    ("flw",      "flw fd, off(rs1)"),
+    ("fsw",      "fsw fs, off(rs1)"),
+    ("fadd.s",   "fadd.s fd, fs1, fs2"),
+    ("fsub.s",   "fsub.s fd, fs1, fs2"),
+    ("fmul.s",   "fmul.s fd, fs1, fs2"),
+    ("fdiv.s",   "fdiv.s fd, fs1, fs2"),
+    ("fsqrt.s",  "fsqrt.s fd, fs1"),
+    ("fmadd.s",  "fmadd.s fd, fs1, fs2, fs3"),
+    ("fmsub.s",  "fmsub.s fd, fs1, fs2, fs3"),
+    ("fnmsub.s", "fnmsub.s fd, fs1, fs2, fs3"),
+    ("fnmadd.s", "fnmadd.s fd, fs1, fs2, fs3"),
+    ("fmin.s",   "fmin.s fd, fs1, fs2"),
+    ("fmax.s",   "fmax.s fd, fs1, fs2"),
+    ("fle.s",    "fle.s rd, fs1, fs2"),
+    ("flt.s",    "flt.s rd, fs1, fs2"),
+    ("feq.s",    "feq.s rd, fs1, fs2"),
+    ("fcvt.w.s", "fcvt.w.s rd, fs1"),
+    ("fcvt.wu.s","fcvt.wu.s rd, fs1"),
+    ("fcvt.s.w", "fcvt.s.w fd, rs1"),
+    ("fcvt.s.wu","fcvt.s.wu fd, rs1"),
+    ("fmv.x.w",  "fmv.x.w rd, fs1"),
+    ("fmv.w.x",  "fmv.w.x fd, rs1"),
+    ("fclass.s", "fclass.s rd, fs1"),
+    ("fsgnj.s",  "fsgnj.s fd, fs1, fs2"),
+    ("fsgnjn.s", "fsgnjn.s fd, fs1, fs2"),
+    ("fsgnjx.s", "fsgnjx.s fd, fs1, fs2"),
+    // RV32D
+    ("fld",      "fld fd, off(rs1)"),
+    ("fsd",      "fsd fs, off(rs1)"),
+    ("fadd.d",   "fadd.d fd, fs1, fs2"),
+    ("fsub.d",   "fsub.d fd, fs1, fs2"),
+    ("fmul.d",   "fmul.d fd, fs1, fs2"),
+    ("fdiv.d",   "fdiv.d fd, fs1, fs2"),
+    ("fsqrt.d",  "fsqrt.d fd, fs1"),
+    ("fmadd.d",  "fmadd.d fd, fs1, fs2, fs3"),
+    ("fmsub.d",  "fmsub.d fd, fs1, fs2, fs3"),
+    ("fnmsub.d", "fnmsub.d fd, fs1, fs2, fs3"),
+    ("fnmadd.d", "fnmadd.d fd, fs1, fs2, fs3"),
+    ("fmin.d",   "fmin.d fd, fs1, fs2"),
+    ("fmax.d",   "fmax.d fd, fs1, fs2"),
+    ("fle.d",    "fle.d rd, fs1, fs2"),
+    ("flt.d",    "flt.d rd, fs1, fs2"),
+    ("feq.d",    "feq.d rd, fs1, fs2"),
+    ("fcvt.w.d", "fcvt.w.d rd, fs1"),
+    ("fcvt.wu.d","fcvt.wu.d rd, fs1"),
+    ("fcvt.d.w", "fcvt.d.w fd, rs1"),
+    ("fcvt.d.wu","fcvt.d.wu fd, rs1"),
+    ("fclass.d", "fclass.d rd, fs1"),
+    ("fcvt.s.d", "fcvt.s.d fd, fs1"),
+    ("fcvt.d.s", "fcvt.d.s fd, fs1"),
+    ("fsgnj.d",  "fsgnj.d fd, fs1, fs2"),
+    ("fsgnjn.d", "fsgnjn.d fd, fs1, fs2"),
+    ("fsgnjx.d", "fsgnjx.d fd, fs1, fs2"),
+    // Zicsr
+    ("csrrw",  "csrrw rd, csr, rs1"),
+    ("csrrs",  "csrrs rd, csr, rs1"),
+    ("csrrc",  "csrrc rd, csr, rs1"),
+    ("csrrwi", "csrrwi rd, csr, imm"),
+    ("csrrsi", "csrrsi rd, csr, imm"),
+    ("csrrci", "csrrci rd, csr, imm"),
+];
+
+const DIRECTIVES: &[&str] = &[
+    ".data", ".text", ".word", ".byte", ".half", ".short", ".float", ".double",
+    ".string", ".asciiz", ".asciz", ".ascii", ".space", ".align", ".globl", ".global",
+    ".equ", ".set",
+];
+
+/// Return the byte offset of the first placeholder within `template`, e.g. for
+/// "li rd, imm" returns Some((3, 5)) pointing at "rd".
+fn first_placeholder_range(template: &str) -> Option<(usize, usize)> {
+    let sp = template.find(' ')?;
+    let start = sp + 1;
+    let end = template[start..].find(',').map(|i| start + i).unwrap_or(template.len());
+    if start < end { Some((start, end)) } else { None }
+}
+
+/// True when the cursor is past the mnemonic on the current line (operand position).
+fn is_operand_position(text: &str, cursor_byte: usize) -> bool {
+    let before = &text[..cursor_byte.min(text.len())];
+    let line_start = before.rfind('\n').map(|i| i + 1).unwrap_or(0);
+    let line = &before[line_start..];
+    line.trim_start().contains(|c: char| c == ' ' || c == ',')
+}
+
+/// Return the word prefix immediately before `cursor_byte` in `text`.
+fn word_before_cursor(text: &str, cursor_byte: usize) -> &str {
+    let before = &text[..cursor_byte.min(text.len())];
+    let start = before
+        .rfind(|c: char| !c.is_alphanumeric() && c != '_' && c != '.')
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    &before[start..]
+}
+
+/// Build a filtered completion list for `prefix` at `cursor_byte`.
+fn compute_completions(prefix: &str, source: &str, cursor_byte: usize) -> Vec<AcEntry> {
+    let pl = prefix.to_lowercase();
+
+    // Directive completions
+    if prefix.starts_with('.') {
+        if prefix.is_empty() {
+            return Vec::new();
+        }
+        let mut entries: Vec<AcEntry> = DIRECTIVES
+            .iter()
+            .filter(|&&d| d.to_lowercase().starts_with(&pl))
+            .map(|&d| AcEntry { display: d.to_owned(), insert: d.to_owned(), first_ph: None })
+            .collect();
+        entries.sort_by(|a, b| a.display.cmp(&b.display));
+        return entries;
+    }
+
+    // Register / label completions (operand position: mnemonic already typed)
+    if is_operand_position(source, cursor_byte) {
+        // Empty prefix: show the most-used ABI integer registers as a starting point
+        if prefix.is_empty() {
+            const COMMON: &[&str] = &[
+                "a0", "a1", "a2", "a3", "a4", "a5", "a6", "a7",
+                "t0", "t1", "t2", "t3", "t4", "t5", "t6",
+                "ra", "sp", "zero",
+            ];
+            return COMMON.iter()
+                .map(|&n| AcEntry { display: n.to_owned(), insert: n.to_owned(), first_ph: None })
+                .collect();
+        }
+        let mut seen: HashSet<String> = HashSet::new();
+        let mut entries: Vec<AcEntry> = Vec::new();
+        for name in crate::hardware::registers::REG_NAMES {
+            if name.to_lowercase().starts_with(&pl) && seen.insert(name.to_string()) {
+                entries.push(AcEntry { display: name.to_string(), insert: name.to_string(), first_ph: None });
+            }
+        }
+        for name in crate::hardware::fp_registers::FP_REG_NAMES {
+            if name.to_lowercase().starts_with(&pl) && seen.insert(name.to_string()) {
+                entries.push(AcEntry { display: name.to_string(), insert: name.to_string(), first_ph: None });
+            }
+        }
+        for line in source.lines() {
+            if let Some(label) = line.trim().strip_suffix(':') {
+                let label = label.trim();
+                if !label.is_empty() && !label.contains(' ') && label.to_lowercase().starts_with(&pl) {
+                    if seen.insert(label.to_owned()) {
+                        entries.push(AcEntry { display: label.to_owned(), insert: label.to_owned(), first_ph: None });
+                    }
+                }
+            }
+        }
+        entries.sort_by(|a, b| a.display.cmp(&b.display));
+        return entries;
+    }
+
+    // Mnemonic completions with full syntax templates
+    let mut entries: Vec<AcEntry> = INSTRUCTION_TEMPLATES
+        .iter()
+        .filter(|(m, _)| m.to_lowercase().starts_with(&pl))
+        .map(|(_, tmpl)| AcEntry {
+            display: tmpl.to_string(),
+            insert: tmpl.to_string(),
+            first_ph: first_placeholder_range(tmpl),
+        })
+        .collect();
+    entries.sort_by(|a, b| a.display.cmp(&b.display));
+    entries
+}
 
 /// Extract (1-based line, 1-based col) from error messages of the form
 /// `"<input>:LINE:COL: TYPE error: MESSAGE"`.
@@ -2458,6 +3169,16 @@ impl eframe::App for OarsApp {
                         BottomTab::Watchpoints,
                         "Watchpoints",
                     );
+                    ui.selectable_value(
+                        &mut self.bottom_tab,
+                        BottomTab::CallStack,
+                        "Call Stack",
+                    );
+                    ui.selectable_value(
+                        &mut self.bottom_tab,
+                        BottomTab::Breakpoints,
+                        "Breakpoints",
+                    );
                 });
                 ui.separator();
                 match self.bottom_tab {
@@ -2466,6 +3187,8 @@ impl eframe::App for OarsApp {
                     BottomTab::Data => self.tabs[self.active].show_data_segment(ui),
                     BottomTab::Stack => self.tabs[self.active].show_stack_viewer(ui),
                     BottomTab::Watchpoints => self.tabs[self.active].show_watchpoints(ui),
+                    BottomTab::CallStack => self.tabs[self.active].show_call_stack(ui),
+                    BottomTab::Breakpoints => self.tabs[self.active].show_breakpoints(ui),
                 }
             });
 

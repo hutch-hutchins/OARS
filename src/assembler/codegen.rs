@@ -57,7 +57,22 @@ fn build_addr_to_labels(symbols: &SymbolTable) -> HashMap<u32, Vec<String>> {
 
 // ─── Pass 1: collect labels ───────────────────────────────────────────────────
 
+/// Pre-scan to collect all .equ / .set constants before label address calculation.
+fn collect_equs(stmts: &[Statement]) -> HashMap<String, i32> {
+    stmts
+        .iter()
+        .filter_map(|s| {
+            if let Statement::Equ(name, val) = s {
+                Some((name.clone(), *val))
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
 fn pass1(stmts: &[Statement]) -> SymbolTable {
+    let equs = collect_equs(stmts);
     let mut sym = SymbolTable::new();
     let mut text_pc = TEXT_BASE;
     let mut data_pc = DATA_BASE;
@@ -70,28 +85,32 @@ fn pass1(stmts: &[Statement]) -> SymbolTable {
                 sym.define(name, if seg == Seg::Text { text_pc } else { data_pc });
             }
             Statement::Instr(instr) => {
-                text_pc += instr_size(instr) * 4;
+                text_pc += instr_size(instr, &equs) * 4;
             }
             Statement::Data(item, _) => {
                 data_pc += data_item_size(item);
             }
-            Statement::Globl(_) => {}
+            Statement::Globl(_) | Statement::Equ(_, _) => {}
         }
+    }
+    for (name, val) in &equs {
+        sym.define_equ(name, *val);
     }
     sym
 }
 
-fn instr_size(instr: &Instruction) -> u32 {
+fn instr_size(instr: &Instruction, equs: &HashMap<String, i32>) -> u32 {
     match instr.mnemonic.as_str() {
         "li" => {
-            if let Some(Operand::Imm(v)) = instr.ops.get(1) {
-                if *v >= -2048 && *v <= 2047 {
-                    1
-                } else {
-                    2
-                }
-            } else {
-                1
+            let imm_val = match instr.ops.get(1) {
+                Some(Operand::Imm(v)) => Some(*v),
+                Some(Operand::Label(name)) => equs.get(name.as_str()).copied(),
+                _ => None,
+            };
+            match imm_val {
+                Some(v) if (-2048..=2047).contains(&v) => 1,
+                Some(_) => 2,
+                None => 2,
             }
         }
         "la" => 2,
@@ -152,7 +171,7 @@ fn pass2(
             Statement::Data(item, _) => {
                 data_pc = emit_data(item, data_pc, mem);
             }
-            Statement::Globl(_) => {}
+            Statement::Globl(_) | Statement::Equ(_, _) => {}
         }
     }
     let _ = seg;
@@ -228,8 +247,23 @@ fn emit_data(item: &DataItem, addr: u32, mem: &mut Memory) -> u32 {
 
 // ─── Instruction encoder ──────────────────────────────────────────────────────
 
+/// Substitute any .equ constant labels with their Imm values before pseudo expansion.
+fn subst_equs(ops: &[Operand], sym: &SymbolTable) -> Vec<Operand> {
+    ops.iter()
+        .map(|o| {
+            if let Operand::Label(name) = o {
+                if let Some(val) = sym.resolve_equ(name) {
+                    return Operand::Imm(val);
+                }
+            }
+            o.clone()
+        })
+        .collect()
+}
+
 fn encode_instr(instr: &Instruction, pc: u32, sym: &SymbolTable) -> Result<Vec<u32>> {
-    let pop_ops = conv_ops(&instr.ops);
+    let subst = subst_equs(&instr.ops, sym);
+    let pop_ops = conv_ops(&subst);
     if let Some(expanded) = pseudo::expand(&instr.mnemonic, &pop_ops) {
         let mut words = Vec::new();
         let mut cur = pc;
@@ -240,7 +274,7 @@ fn encode_instr(instr: &Instruction, pc: u32, sym: &SymbolTable) -> Result<Vec<u
         }
         return Ok(words);
     }
-    let ops = resolve_ops(&instr.ops, pc, sym)?;
+    let ops = resolve_ops(&subst, pc, sym)?;
     Ok(vec![encode_real(&instr.mnemonic, &ops, pc, sym)?])
 }
 

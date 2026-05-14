@@ -109,6 +109,7 @@ Ready-to-run examples in [`examples/asm/`](examples/asm/) cover the advanced ins
 | [`linked_list.s`](examples/asm/linked_list.s) | Syscall 9 — `sbrk`, `lb`/`sb`, pointer chasing | Singly linked list: allocate nodes, link them, traverse and print |
 | [`string_ops.s`](examples/asm/string_ops.s) | `lb`/`sb`, byte-level loops | `strlen` + `str_reverse` subroutines applied to `"hello"` |
 | [`selection_sort.s`](examples/asm/selection_sort.s) | Nested loops, `lw`/`sw`, index arithmetic | Selection sort on `{64,25,12,22,11}` → `11 12 22 25 64` |
+| [`constants.s`](examples/asm/constants.s) | `.equ` / `.set` symbolic constants | Defines `SIZE=8` and `FIRST=1`; sums 1..=8 = 36 |
 
 Open any file in OARS, click **Assemble**, then **Run** to see the output in the Console panel.
 
@@ -183,7 +184,24 @@ The binary will be at `target/release/oars` (or `oars.exe` on Windows).
 
 ## Roadmap
 
-### v0.5.0 — Current Release ✓
+### v0.6.0 — Current Release ✓
+
+#### Assembler
+
+- [x] **`.equ` / `.set` symbolic constants** — define named integer constants with `.equ NAME, VALUE` anywhere in the file; use the name as an immediate operand in any instruction (`li a0, SIZE`, `addi t0, t0, STRIDE`, loop bounds, etc.)
+
+#### Debugger & GUI
+
+- [x] **Call Stack panel** — new bottom-panel tab shows the live call chain (callee → … → main) updated on every `jal`/`jalr ra` call and `ret`; gives instant visibility into recursion depth and call order
+- [x] **Conditional breakpoints** — breakpoints can carry an optional condition expression (`REG OP VALUE`, e.g. `t0 >= 5`, `a0 == 0`); execution only pauses when the expression is true at that PC; managed in the **Breakpoints** bottom-panel tab
+- [x] **Editor autocomplete** — context-aware popup while typing: at the start of a line shows full instruction syntax templates (e.g. `li rd, imm`, `sw rs2, off(rs1)`); in operand position shows register names and source labels; selecting a template inserts it and selects the first operand placeholder so you can overtype immediately; scrollable list with wrap-around navigation; **Tab** or **Enter** to accept, arrow keys to navigate, **Escape** to dismiss; **Tab** no longer cycles app focus when the editor is active
+
+#### v0.6.0 Examples & Tests
+
+- [x] New example: `constants.s` — `.equ` demo; sums 1..=8 = 36
+- [x] Integration test suite grown to 17 tests, all passing
+
+### v0.5.0 ✓
 
 #### Debugger
 
@@ -253,8 +271,11 @@ The binary will be at `target/release/oars` (or `oars.exe` on Windows).
 
 ### Future
 
-- [ ] Export assembled binary (ELF or raw flat binary)
 - [ ] RV64I 64-bit mode
+- [ ] Multi-file / include support (`.include` directive)
+- [ ] Autocomplete tab-stop navigation through all operand placeholders
+- [ ] Disassembler view — decode arbitrary memory regions back to mnemonics
+- [ ] Session save / restore — reopen files with breakpoints and watch pins intact
 
 ## License
 

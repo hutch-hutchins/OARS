@@ -62,6 +62,7 @@ pub enum Statement {
     Data(DataItem, Span),
     Segment(Seg, Span),
     Globl(String),
+    Equ(String, i32),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -253,7 +254,17 @@ impl Parser {
                 Statement::Data(DataItem::Align(n), span.clone())
             }
 
-            // Silently ignore unknown directives (e.g. .set, .option, .size)
+            "equ" | "set" => {
+                let name = self.expect_ident()?;
+                if matches!(self.peek_token(), Token::Comma) {
+                    self.advance();
+                }
+                let val = self.expect_int()?;
+                self.expect_newline_or_eof()?;
+                Statement::Equ(name, val as i32)
+            }
+
+            // Silently ignore unknown directives (e.g. .option, .size)
             _ => {
                 while !matches!(self.peek_token(), Token::Newline | Token::Eof) {
                     self.advance();
