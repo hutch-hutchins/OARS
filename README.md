@@ -286,9 +286,18 @@ The binary will be at `target/release/oars` (or `oars.exe` on Windows).
 - [x] **`.dword` / `.quad` directive** — emit 64-bit values in `.data` sections
 - [x] **64-bit register display** — integer registers shown as `0x00000000 00000000` with a space at the 32/64-bit boundary for easy reading
 
+#### v0.7.0 Assembler
+
+- [x] **`.include` directive** — pull in any `.s` file with `.include "path"`; paths are resolved relative to the including file so libraries can live alongside the main program; circular includes are detected and reported; works in both CLI and GUI modes
+
 #### GUI
 
+- [x] **Disassembler view** — new "Disassembler" tab in the main panel; shows every assembled instruction as address | machine word | decoded mnemonic | original source line; the current PC row is highlighted yellow and scrolled into view; covers RV32I, RV32M, RV32F, RV32D, Zicsr, RV64I, and common pseudo-instructions (`nop`, `ret`, `mv`, `li`, `not`, `neg`, `j`, `beqz`, etc.)
+- [x] **Instruction reference in disassembler** — click any decoded instruction row to see an inline description and example at the bottom of the Disassembler panel; click the same row again to dismiss; covers ~80 instructions including all pseudos, RV32IMFD, Zicsr, and RV64I
+- [x] **Autocomplete tab-stop navigation** — after inserting an instruction template (e.g. `add rd, rs1, rs2`), the first operand placeholder is selected automatically; each subsequent **Tab** press advances to the next placeholder so all operands can be filled in without touching the mouse
 - [x] **PC indicator arrow** — replaced the Unicode `→` character (missing from egui's bundled font, rendered as a yellow box) with a painted filled triangle; always renders correctly regardless of font
+- [x] **`.include` path autocomplete** — while typing a path inside `.include "…"`, the editor shows completions for `.s` / `.asm` files and sub-directories in the current file's directory; triggered automatically on each keystroke or with **Ctrl+Space**
+- [x] **Session save / restore** — OARS remembers open files, source content (for unsaved buffers), per-tab mode (RV32/RV64), breakpoints, watch pins, and theme across application restarts; no manual export needed
 
 #### v0.7.0 Examples & Tests
 
@@ -299,10 +308,7 @@ The binary will be at `target/release/oars` (or `oars.exe` on Windows).
 
 ### Future
 
-- [ ] Multi-file / include support (`.include` directive)
-- [ ] Autocomplete tab-stop navigation through all operand placeholders
-- [ ] Disassembler view — decode arbitrary memory regions back to mnemonics
-- [ ] Session save / restore — reopen files with breakpoints and watch pins intact
+No items pending — all planned v0.7.0 features are complete.
 
 ## License
 

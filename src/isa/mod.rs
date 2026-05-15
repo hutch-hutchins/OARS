@@ -1,3 +1,4 @@
+pub mod disasm;
 pub mod formats;
 pub mod fp;
 pub mod pseudo;

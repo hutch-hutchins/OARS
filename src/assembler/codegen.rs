@@ -90,7 +90,7 @@ fn pass1(stmts: &[Statement]) -> SymbolTable {
             Statement::Data(item, _) => {
                 data_pc += data_item_size(item);
             }
-            Statement::Globl(_) | Statement::Equ(_, _) => {}
+            Statement::Globl(_) | Statement::Equ(_, _) | Statement::Include(_) => {}
         }
     }
     for (name, val) in &equs {
@@ -172,7 +172,7 @@ fn pass2(
             Statement::Data(item, _) => {
                 data_pc = emit_data(item, data_pc, mem);
             }
-            Statement::Globl(_) | Statement::Equ(_, _) => {}
+            Statement::Globl(_) | Statement::Equ(_, _) | Statement::Include(_) => {}
         }
     }
     let _ = seg;

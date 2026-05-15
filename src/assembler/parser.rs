@@ -65,6 +65,8 @@ pub enum Statement {
     Segment(Seg, Span),
     Globl(String),
     Equ(String, i32),
+    /// Resolved by `assembler::include::resolve` before codegen; never reaches the assembler.
+    Include(std::path::PathBuf),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -264,6 +266,12 @@ impl Parser {
                 } else {
                     Statement::Data(DataItem::Dwords(vals), span.clone())
                 }
+            }
+
+            "include" => {
+                let path = self.expect_string()?;
+                self.expect_newline_or_eof()?;
+                Statement::Include(std::path::PathBuf::from(path))
             }
 
             "equ" | "set" => {

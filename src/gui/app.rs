@@ -40,6 +40,7 @@ enum SimState {
 enum MainTab {
     Editor,
     TextSegment,
+    Disasm,
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -61,7 +62,7 @@ enum RegisterTab {
     Watches,
 }
 
-#[derive(PartialEq, Eq, Clone, Copy, Default)]
+#[derive(PartialEq, Eq, Clone, Copy, Default, serde::Serialize, serde::Deserialize)]
 enum XLen {
     #[default]
     Rv32,
@@ -70,14 +71,14 @@ enum XLen {
 
 // ─── Watch panel ─────────────────────────────────────────────────────────────
 
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 enum WatchTarget {
     IntReg(usize),
     FpReg(usize),
     Mem(u32),
 }
 
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct Watch {
     label: String,
     target: WatchTarget,
@@ -87,9 +88,8 @@ struct Watch {
 
 #[derive(Clone)]
 struct AcEntry {
-    display: String,                  // shown in the popup (e.g. "li rd, imm")
-    insert: String,                   // inserted into the editor
-    first_ph: Option<(usize, usize)>, // byte range of first placeholder within `insert`
+    display: String, // shown in the popup (e.g. "li rd, imm")
+    insert: String,  // inserted into the editor
 }
 
 struct AcState {
@@ -206,8 +206,12 @@ struct Tab {
     find_case_sensitive: bool,
     // Editor autocomplete
     ac: Option<AcState>,
+    // Pending tab-stop ranges (char indices) remaining after a template insertion
+    tab_stops: Vec<(usize, usize)>,
     // Char indices [start, end] to select in the editor on the next frame
     pending_cursor: Option<(usize, usize)>,
+    // Mnemonic selected in the Disassembler view (for inline reference display)
+    disasm_selected: Option<String>,
 }
 
 impl Tab {
@@ -240,7 +244,9 @@ impl Tab {
             replace_query: String::new(),
             find_case_sensitive: false,
             ac: None,
+            tab_stops: Vec::new(),
             pending_cursor: None,
+            disasm_selected: None,
         }
     }
 
@@ -372,6 +378,25 @@ impl Tab {
                 return false;
             }
         };
+
+        // Resolve .include directives relative to the saved file's directory,
+        // falling back to the process working directory for unsaved buffers.
+        let base_dir_buf;
+        let base_dir: &std::path::Path = match self.file_path.as_deref().and_then(|p| p.parent()) {
+            Some(p) => p,
+            None => {
+                base_dir_buf = std::env::current_dir().unwrap_or_default();
+                &base_dir_buf
+            }
+        };
+        let stmts = match crate::assembler::include::resolve(stmts, base_dir) {
+            Ok(s) => s,
+            Err(e) => {
+                self.sim_state = SimState::Error(e.to_string(), None);
+                return false;
+            }
+        };
+
         if self.xlen == XLen::Rv64 {
             let mut cpu = CpuState64::new(TEXT_BASE);
             match codegen::assemble(&stmts, &mut cpu.mem) {
@@ -817,20 +842,58 @@ impl Tab {
                 let entry = ac.candidates[ac.selected].clone();
                 let word_start = ac.word_start;
                 let word_end = ac.word_end.min(self.source.len());
-                self.source
-                    .replace_range(word_start..word_end, &entry.insert);
-                if let Some((ph_start_b, ph_end_b)) = entry.first_ph {
-                    let abs_start = (word_start + ph_start_b).min(self.source.len());
-                    let abs_end = (word_start + ph_end_b).min(self.source.len());
+                self.source.replace_range(word_start..word_end, &entry.insert);
+
+                // Compute absolute char positions for every placeholder in the template.
+                // Templates are ASCII so byte offset == char offset within the template.
+                let mut ph_iter = all_placeholder_ranges(&entry.insert).into_iter();
+
+                if let Some((s, e)) = ph_iter.next() {
+                    let abs_s = (word_start + s).min(self.source.len());
+                    let abs_e = (word_start + e).min(self.source.len());
                     cursor_to_set = Some((
-                        self.source[..abs_start].chars().count(),
-                        self.source[..abs_end].chars().count(),
+                        self.source[..abs_s].chars().count(),
+                        self.source[..abs_e].chars().count(),
                     ));
                 }
+                // Remaining placeholders become tab stops for subsequent Tab presses.
+                self.tab_stops = ph_iter
+                    .map(|(s, e)| {
+                        let abs_s = (word_start + s).min(self.source.len());
+                        let abs_e = (word_start + e).min(self.source.len());
+                        (
+                            self.source[..abs_s].chars().count(),
+                            self.source[..abs_e].chars().count(),
+                        )
+                    })
+                    .collect();
             }
             self.ac = None;
         } else if ac_dismiss {
             self.ac = None;
+        }
+
+        // Tab-stop navigation — advance to the next placeholder when Tab is pressed
+        // with no popup open and stops are pending.
+        let mut advance_tab_stop = false;
+        if self.ac.is_none() && !self.tab_stops.is_empty() {
+            ui.input_mut(|i| {
+                i.events.retain(|e| match e {
+                    egui::Event::Key {
+                        key: egui::Key::Tab,
+                        pressed: true,
+                        ..
+                    } => {
+                        advance_tab_stop = true;
+                        false
+                    }
+                    _ => true,
+                });
+            });
+        }
+        if advance_tab_stop {
+            let stop = self.tab_stops.remove(0);
+            cursor_to_set = Some(stop);
         }
         let pending_cursor = self.pending_cursor.take();
 
@@ -895,8 +958,26 @@ impl Tab {
                     if te_out.response.changed() || force_open {
                         if let Some(cr) = te_out.cursor_range {
                             let byte_idx = cr.primary.ccursor.index;
-                            let prefix = word_before_cursor(source, byte_idx).to_owned();
-                            let candidates = compute_completions(&prefix, source, byte_idx);
+
+                            // Check for .include path context before normal completion
+                            let (word_start, word_end, candidates) =
+                                if let Some((path_start, partial)) =
+                                    include_path_context(source, byte_idx)
+                                {
+                                    let base_dir = self.file_path
+                                        .as_deref()
+                                        .and_then(|p| p.parent())
+                                        .unwrap_or(std::path::Path::new("."));
+                                    let cands = complete_include_paths(&partial, base_dir);
+                                    (path_start, byte_idx, cands)
+                                } else {
+                                    let prefix =
+                                        word_before_cursor(source, byte_idx).to_owned();
+                                    let cands =
+                                        compute_completions(&prefix, source, byte_idx);
+                                    (byte_idx.saturating_sub(prefix.len()), byte_idx, cands)
+                                };
+
                             if !candidates.is_empty() {
                                 let cr_rect = te_out.galley.pos_from_cursor(&cr.primary);
                                 let anchor =
@@ -905,8 +986,8 @@ impl Tab {
                                     candidates,
                                     selected: 0,
                                     anchor,
-                                    word_start: byte_idx.saturating_sub(prefix.len()),
-                                    word_end: byte_idx,
+                                    word_start,
+                                    word_end,
                                 });
                             } else {
                                 dismiss_ac = true;
@@ -976,14 +1057,26 @@ impl Tab {
         if let Some((start, end, entry)) = click_result {
             let safe_end = end.min(self.source.len());
             self.source.replace_range(start..safe_end, &entry.insert);
-            if let Some((ph_start_b, ph_end_b)) = entry.first_ph {
-                let abs_start = (start + ph_start_b).min(self.source.len());
-                let abs_end = (start + ph_end_b).min(self.source.len());
+
+            let mut ph_iter = all_placeholder_ranges(&entry.insert).into_iter();
+            if let Some((s, e)) = ph_iter.next() {
+                let abs_s = (start + s).min(self.source.len());
+                let abs_e = (start + e).min(self.source.len());
                 self.pending_cursor = Some((
-                    self.source[..abs_start].chars().count(),
-                    self.source[..abs_end].chars().count(),
+                    self.source[..abs_s].chars().count(),
+                    self.source[..abs_e].chars().count(),
                 ));
             }
+            self.tab_stops = ph_iter
+                .map(|(s, e)| {
+                    let abs_s = (start + s).min(self.source.len());
+                    let abs_e = (start + e).min(self.source.len());
+                    (
+                        self.source[..abs_s].chars().count(),
+                        self.source[..abs_e].chars().count(),
+                    )
+                })
+                .collect();
             self.ac = None;
         }
     }
@@ -1424,6 +1517,164 @@ impl Tab {
             });
     }
 
+    fn show_disasm(&mut self, ui: &mut egui::Ui) {
+        use crate::isa::disasm::{describe, disassemble};
+
+        let Some(ref asm_out) = self.asm_out else {
+            ui.centered_and_justified(|ui| {
+                ui.label("Assemble a program first to see the disassembly.");
+            });
+            return;
+        };
+
+        let current_pc: Option<u32> = self
+            .cpu
+            .as_ref()
+            .map(|c| c.pc)
+            .or_else(|| self.cpu64.as_ref().map(|c| c.pc as u32));
+
+        // Clone row data so we don't hold a borrow on `self` across the table closure.
+        let rows: Vec<(u32, u32, u32)> = asm_out
+            .text_rows
+            .iter()
+            .map(|r| (r.addr, r.word, r.src_line))
+            .collect();
+        let source_lines: Vec<String> = self.source.lines().map(|s| s.to_owned()).collect();
+        let current_sel = self.disasm_selected.clone();
+
+        // Reserve space for the reference panel at the bottom (if something is selected).
+        let ref_height: f32 = if current_sel.is_some() { 62.0 } else { 0.0 };
+        let table_height = (ui.available_height() - ref_height).max(40.0);
+
+        let mut clicked_mnem: Option<String> = None;
+
+        use egui_extras::{Column, TableBuilder};
+        TableBuilder::new(ui)
+            .striped(true)
+            .max_scroll_height(table_height)
+            .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+            .column(Column::exact(14.0))
+            .column(Column::exact(90.0))
+            .column(Column::exact(100.0))
+            .column(Column::remainder().clip(true).at_least(200.0))
+            .column(Column::remainder().clip(true).at_least(160.0))
+            .header(18.0, |mut h| {
+                h.col(|_| {});
+                h.col(|ui| { ui.strong("Address"); });
+                h.col(|ui| { ui.strong("Machine Code"); });
+                h.col(|ui| { ui.strong("Decoded"); });
+                h.col(|ui| { ui.strong("Source"); });
+            })
+            .body(|body| {
+                body.rows(18.0, rows.len(), |mut row| {
+                    let i = row.index();
+                    let (addr, word, src_line) = rows[i];
+                    let hot = current_pc == Some(addr);
+                    let decoded = disassemble(word, addr);
+                    let src = source_lines
+                        .get(src_line.saturating_sub(1) as usize)
+                        .map(|s| s.trim().to_owned())
+                        .unwrap_or_default();
+                    let base_mnem = decoded.split_whitespace().next().unwrap_or("").to_owned();
+                    let row_selected = current_sel.as_deref() == Some(&base_mnem);
+
+                    // PC arrow column
+                    row.col(|ui| {
+                        if hot {
+                            let (rect, _) = ui.allocate_exact_size(
+                                egui::vec2(14.0, 18.0),
+                                egui::Sense::hover(),
+                            );
+                            let my = rect.center().y;
+                            let x0 = rect.left() + 1.0;
+                            let x1 = rect.right() - 1.0;
+                            ui.painter().add(egui::Shape::convex_polygon(
+                                vec![
+                                    egui::pos2(x0, my - 5.0),
+                                    egui::pos2(x1, my),
+                                    egui::pos2(x0, my + 5.0),
+                                ],
+                                egui::Color32::YELLOW,
+                                egui::Stroke::NONE,
+                            ));
+                        }
+                    });
+
+                    row.col(|ui| {
+                        let t = RichText::new(format!("{addr:#010x}")).monospace();
+                        let resp = ui.label(if hot {
+                            t.color(egui::Color32::YELLOW)
+                        } else {
+                            t
+                        });
+                        if hot { resp.scroll_to_me(None); }
+                    });
+
+                    row.col(|ui| {
+                        ui.label(
+                            RichText::new(format!("{word:#010x}"))
+                                .monospace()
+                                .color(egui::Color32::from_rgb(140, 160, 200)),
+                        );
+                    });
+
+                    row.col(|ui| {
+                        let color = if hot {
+                            egui::Color32::YELLOW
+                        } else if row_selected {
+                            egui::Color32::from_rgb(100, 200, 255)
+                        } else {
+                            ui.visuals().text_color()
+                        };
+                        let resp = ui.selectable_label(
+                            row_selected,
+                            RichText::new(&decoded).monospace().color(color),
+                        );
+                        if resp.clicked() {
+                            clicked_mnem = Some(base_mnem.clone());
+                        }
+                    });
+
+                    row.col(|ui| {
+                        ui.label(
+                            RichText::new(&src)
+                                .monospace()
+                                .color(egui::Color32::from_rgb(120, 130, 120)),
+                        );
+                    });
+                });
+            });
+
+        // Apply click
+        if let Some(mnem) = clicked_mnem {
+            self.disasm_selected = if self.disasm_selected.as_deref() == Some(&mnem) {
+                None // click same row again to deselect
+            } else {
+                Some(mnem)
+            };
+        }
+
+        // Reference panel
+        if let Some(ref mnem) = self.disasm_selected.clone() {
+            ui.separator();
+            if let Some((desc, example)) = describe(mnem) {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(mnem).monospace().strong()
+                        .color(egui::Color32::from_rgb(100, 200, 255)));
+                    ui.separator();
+                    ui.label(desc);
+                });
+                ui.horizontal(|ui| {
+                    ui.weak("Example:");
+                    ui.label(RichText::new(example).monospace()
+                        .color(egui::Color32::from_rgb(160, 220, 160)));
+                });
+            } else {
+                ui.label(format!("{mnem} — no reference entry"));
+            }
+        }
+    }
+
     fn show_call_stack(&self, ui: &mut egui::Ui) {
         let current_pc: Option<u32> = self
             .cpu
@@ -1644,6 +1895,25 @@ enum HelpTab {
     Syscalls,
 }
 
+// ─── Session persistence ──────────────────────────────────────────────────────
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct SessionData {
+    active: usize,
+    tabs: Vec<TabSession>,
+    watches: Vec<Watch>,
+    dark_mode: bool,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct TabSession {
+    file_path: Option<String>,
+    /// Source text only stored for unsaved (no file_path) buffers.
+    source: Option<String>,
+    xlen: XLen,
+    breakpoints: Vec<(u32, Option<String>)>,
+}
+
 pub struct OarsApp {
     tabs: Vec<Tab>,
     active: usize,
@@ -1673,15 +1943,13 @@ const CHANGED_COLOR: egui::Color32 = egui::Color32::from_rgb(100, 220, 100);
 
 impl OarsApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        cc.egui_ctx.set_visuals(egui::Visuals::dark());
-
         let mut style = (*cc.egui_ctx.style()).clone();
         style
             .text_styles
             .insert(egui::TextStyle::Monospace, egui::FontId::monospace(13.0));
         cc.egui_ctx.set_style(style);
 
-        Self {
+        let mut app = Self {
             tabs: vec![Tab::new()],
             active: 0,
             steps_per_frame: 50_000,
@@ -1694,7 +1962,54 @@ impl OarsApp {
             help_tab: HelpTab::Pseudo,
             show_about: false,
             dark_mode: true,
+        };
+
+        if let Some(storage) = cc.storage {
+            if let Some(json) = storage.get_string("session_v1") {
+                if let Ok(session) = serde_json::from_str::<SessionData>(&json) {
+                    app.restore_session(session);
+                }
+            }
         }
+
+        cc.egui_ctx.set_visuals(if app.dark_mode {
+            egui::Visuals::dark()
+        } else {
+            egui::Visuals::light()
+        });
+
+        app
+    }
+
+    fn restore_session(&mut self, session: SessionData) {
+        let restored: Vec<Tab> = session
+            .tabs
+            .into_iter()
+            .map(|ts| {
+                let mut tab = Tab::new();
+                if let Some(ref path_str) = ts.file_path {
+                    let path = PathBuf::from(path_str);
+                    if let Ok(src) = std::fs::read_to_string(&path) {
+                        tab.source = src;
+                        tab.file_path = Some(path);
+                    }
+                } else if let Some(src) = ts.source {
+                    tab.source = src;
+                }
+                tab.xlen = ts.xlen;
+                for (addr, cond) in ts.breakpoints {
+                    tab.breakpoints.insert(addr, cond);
+                }
+                tab
+            })
+            .collect();
+
+        if !restored.is_empty() {
+            self.tabs = restored;
+            self.active = session.active.min(self.tabs.len() - 1);
+        }
+        self.watches = session.watches;
+        self.dark_mode = session.dark_mode;
     }
 
     // ── Panels ────────────────────────────────────────────────────────────────
@@ -2509,20 +2824,33 @@ const DIRECTIVES: &[&str] = &[
     ".asciiz", ".asciz", ".ascii", ".space", ".align", ".globl", ".global", ".equ", ".set",
 ];
 
-/// Return the byte offset of the first placeholder within `template`, e.g. for
-/// "li rd, imm" returns Some((3, 5)) pointing at "rd".
-fn first_placeholder_range(template: &str) -> Option<(usize, usize)> {
-    let sp = template.find(' ')?;
-    let start = sp + 1;
-    let end = template[start..]
-        .find(',')
-        .map(|i| start + i)
-        .unwrap_or(template.len());
-    if start < end {
-        Some((start, end))
-    } else {
-        None
+/// Return the byte ranges of every operand placeholder in a template string.
+/// E.g. "add rd, rs1, rs2" → [(4,6), (8,11), (13,16)]
+/// Templates are ASCII-only, so byte offset == char offset.
+fn all_placeholder_ranges(template: &str) -> Vec<(usize, usize)> {
+    let start = match template.find(' ') {
+        Some(i) => i + 1,
+        None => return vec![],
+    };
+    let mut ranges = Vec::new();
+    let mut in_word = false;
+    let mut word_start = 0usize;
+    for (i, c) in template[start..].char_indices() {
+        let abs = start + i;
+        if c.is_alphanumeric() || c == '_' {
+            if !in_word {
+                word_start = abs;
+                in_word = true;
+            }
+        } else if in_word {
+            ranges.push((word_start, abs));
+            in_word = false;
+        }
     }
+    if in_word {
+        ranges.push((word_start, template.len()));
+    }
+    ranges
 }
 
 /// True when the cursor is past the mnemonic on the current line (operand position).
@@ -2543,6 +2871,72 @@ fn word_before_cursor(text: &str, cursor_byte: usize) -> &str {
     &before[start..]
 }
 
+/// If the cursor is inside a `.include "..."` path string, return
+/// `(path_start_byte, partial_path)`.
+fn include_path_context(text: &str, cursor_byte: usize) -> Option<(usize, String)> {
+    let safe = cursor_byte.min(text.len());
+    let before = &text[..safe];
+    let line_start = before.rfind('\n').map(|i| i + 1).unwrap_or(0);
+    let line = &before[line_start..];
+
+    let inc_start = line.find(".include")?;
+    let after_kw = &line[inc_start + 8..];
+    let ws_len = after_kw.len() - after_kw.trim_start().len();
+    let after_ws = &after_kw[ws_len..];
+    if !after_ws.starts_with('"') {
+        return None;
+    }
+    let path_abs = line_start + inc_start + 8 + ws_len + 1; // byte after opening `"`
+    let partial = &text[path_abs..safe];
+    if partial.contains('"') {
+        return None; // already past closing quote
+    }
+    Some((path_abs, partial.to_owned()))
+}
+
+/// List `.s` / `.asm` files (and sub-directories) in `base_dir` matching `partial`.
+fn complete_include_paths(partial: &str, base_dir: &std::path::Path) -> Vec<AcEntry> {
+    let (dir_part, file_prefix) = match partial.rfind('/').or_else(|| partial.rfind('\\')) {
+        Some(i) => (&partial[..=i], &partial[i + 1..]),
+        None => ("", partial),
+    };
+    let search_dir = if dir_part.is_empty() {
+        base_dir.to_owned()
+    } else {
+        base_dir.join(dir_part)
+    };
+    let fp = file_prefix.to_lowercase();
+    let Ok(entries) = std::fs::read_dir(&search_dir) else {
+        return Vec::new();
+    };
+    let mut results: Vec<AcEntry> = entries
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name();
+            let name_str = name.to_string_lossy().into_owned();
+            if !name_str.to_lowercase().starts_with(&fp) {
+                return None;
+            }
+            let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            let is_asm = name_str.ends_with(".s") || name_str.ends_with(".asm");
+            if !is_dir && !is_asm {
+                return None;
+            }
+            let insert = if is_dir {
+                format!("{dir_part}{name_str}/")
+            } else {
+                format!("{dir_part}{name_str}")
+            };
+            Some(AcEntry {
+                display: insert.clone(),
+                insert,
+            })
+        })
+        .collect();
+    results.sort_by(|a, b| a.display.cmp(&b.display));
+    results
+}
+
 /// Build a filtered completion list for `prefix` at `cursor_byte`.
 fn compute_completions(prefix: &str, source: &str, cursor_byte: usize) -> Vec<AcEntry> {
     let pl = prefix.to_lowercase();
@@ -2558,7 +2952,6 @@ fn compute_completions(prefix: &str, source: &str, cursor_byte: usize) -> Vec<Ac
             .map(|&d| AcEntry {
                 display: d.to_owned(),
                 insert: d.to_owned(),
-                first_ph: None,
             })
             .collect();
         entries.sort_by(|a, b| a.display.cmp(&b.display));
@@ -2578,8 +2971,7 @@ fn compute_completions(prefix: &str, source: &str, cursor_byte: usize) -> Vec<Ac
                 .map(|&n| AcEntry {
                     display: n.to_owned(),
                     insert: n.to_owned(),
-                    first_ph: None,
-                })
+                    })
                 .collect();
         }
         let mut seen: HashSet<String> = HashSet::new();
@@ -2589,8 +2981,7 @@ fn compute_completions(prefix: &str, source: &str, cursor_byte: usize) -> Vec<Ac
                 entries.push(AcEntry {
                     display: name.to_string(),
                     insert: name.to_string(),
-                    first_ph: None,
-                });
+                    });
             }
         }
         for name in crate::hardware::fp_registers::FP_REG_NAMES {
@@ -2598,8 +2989,7 @@ fn compute_completions(prefix: &str, source: &str, cursor_byte: usize) -> Vec<Ac
                 entries.push(AcEntry {
                     display: name.to_string(),
                     insert: name.to_string(),
-                    first_ph: None,
-                });
+                    });
             }
         }
         for line in source.lines() {
@@ -2613,8 +3003,7 @@ fn compute_completions(prefix: &str, source: &str, cursor_byte: usize) -> Vec<Ac
                     entries.push(AcEntry {
                         display: label.to_owned(),
                         insert: label.to_owned(),
-                        first_ph: None,
-                    });
+                            });
                 }
             }
         }
@@ -2629,7 +3018,6 @@ fn compute_completions(prefix: &str, source: &str, cursor_byte: usize) -> Vec<Ac
         .map(|(_, tmpl)| AcEntry {
             display: tmpl.to_string(),
             insert: tmpl.to_string(),
-            first_ph: first_placeholder_range(tmpl),
         })
         .collect();
     entries.sort_by(|a, b| a.display.cmp(&b.display));
@@ -3341,6 +3729,23 @@ fn show_help_content(ui: &mut egui::Ui, active: &mut HelpTab) {
 // ─── eframe::App ─────────────────────────────────────────────────────────────
 
 impl eframe::App for OarsApp {
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        let session = SessionData {
+            active: self.active,
+            tabs: self.tabs.iter().map(|t| TabSession {
+                file_path: t.file_path.as_ref().map(|p| p.to_string_lossy().into_owned()),
+                source: if t.file_path.is_none() { Some(t.source.clone()) } else { None },
+                xlen: t.xlen,
+                breakpoints: t.breakpoints.iter().map(|(&a, c)| (a, c.clone())).collect(),
+            }).collect(),
+            watches: self.watches.clone(),
+            dark_mode: self.dark_mode,
+        };
+        if let Ok(json) = serde_json::to_string(&session) {
+            storage.set_string("session_v1", json);
+        }
+    }
+
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Apply theme every frame
         ctx.set_visuals(if self.dark_mode {
@@ -3566,11 +3971,12 @@ impl eframe::App for OarsApp {
             });
             ui.separator();
 
-            // Main content sub-tabs (Editor / Text Segment)
+            // Main content sub-tabs (Editor / Text Segment / Disassembler)
             ui.horizontal(|ui| {
                 let tab = &mut self.tabs[self.active];
                 ui.selectable_value(&mut tab.main_tab, MainTab::Editor, "Editor");
                 ui.selectable_value(&mut tab.main_tab, MainTab::TextSegment, "Text Segment");
+                ui.selectable_value(&mut tab.main_tab, MainTab::Disasm, "Disassembler");
             });
             ui.separator();
 
@@ -3578,6 +3984,7 @@ impl eframe::App for OarsApp {
             match main {
                 MainTab::Editor => self.tabs[self.active].show_editor(ui),
                 MainTab::TextSegment => self.tabs[self.active].show_text_segment(ui),
+                MainTab::Disasm => self.tabs[self.active].show_disasm(ui),
             }
         });
     }

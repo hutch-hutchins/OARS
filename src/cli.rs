@@ -1,4 +1,4 @@
-use crate::assembler::{codegen, parser};
+use crate::assembler::{codegen, include, parser};
 use crate::simulator::engine::{self, CpuState};
 use anyhow::{Context, Result};
 use clap::{Args, Parser};
@@ -45,6 +45,11 @@ pub fn run_headless(path: PathBuf, opts: &RunOpts) -> Result<()> {
     // Parse
     let stmts =
         parser::parse(&src).with_context(|| format!("parse error in {}", path.display()))?;
+
+    // Resolve .include directives relative to the source file's directory
+    let base_dir = path.parent().unwrap_or(std::path::Path::new("."));
+    let stmts = include::resolve(stmts, base_dir)
+        .with_context(|| format!("include error in {}", path.display()))?;
 
     // Assemble into a fresh memory image
     let mut cpu = CpuState::new(crate::hardware::memory::TEXT_BASE);
