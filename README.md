@@ -279,6 +279,7 @@ The binary will be at `target/release/oars` (or `oars.exe` on Windows).
 
 ### Future
 
+- [ ] Release archives include an `examples/` folder with all ready-to-run example programs
 - [ ] RV64I 64-bit mode
 - [ ] Multi-file / include support (`.include` directive)
 - [ ] Autocomplete tab-stop navigation through all operand placeholders
