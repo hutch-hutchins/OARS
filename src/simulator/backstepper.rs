@@ -2,7 +2,9 @@
 ///
 /// Saves (pc, regs, fp_regs, mem_undo, heap_ptr) before each instruction into
 /// a ring buffer. Memory writes are fully reversed on backstep.
-use crate::hardware::{fp_registers::FpRegisters, memory::Memory, registers::RegisterFile};
+use crate::hardware::{
+    fp_registers::FpRegisters, memory::Memory, registers::RegisterFile, registers64::RegFile64,
+};
 
 const HISTORY_CAP: usize = 256;
 
@@ -87,6 +89,91 @@ impl Backstepper {
 }
 
 impl Default for Backstepper {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ─── 64-bit variant ───────────────────────────────────────────────────────────
+
+#[derive(Clone)]
+struct Snapshot64 {
+    pc: u64,
+    regs: [u64; 32],
+    fp: [u64; 32],
+    mem_undo: Vec<(u32, Option<u8>)>,
+    heap_ptr: u32,
+}
+
+pub struct Backstepper64 {
+    buf: Vec<Snapshot64>,
+    head: usize,
+    len: usize,
+}
+
+impl Backstepper64 {
+    pub fn new() -> Self {
+        Self {
+            buf: Vec::with_capacity(HISTORY_CAP),
+            head: 0,
+            len: 0,
+        }
+    }
+
+    pub fn push(
+        &mut self,
+        pc: u64,
+        regs: [u64; 32],
+        fp: [u64; 32],
+        mem_undo: Vec<(u32, Option<u8>)>,
+        heap_ptr: u32,
+    ) {
+        let snap = Snapshot64 {
+            pc,
+            regs,
+            fp,
+            mem_undo,
+            heap_ptr,
+        };
+        if self.buf.len() < HISTORY_CAP {
+            self.buf.push(snap);
+        } else {
+            self.buf[self.head] = snap;
+        }
+        self.head = (self.head + 1) % HISTORY_CAP;
+        self.len = (self.len + 1).min(HISTORY_CAP);
+    }
+
+    pub fn pop(
+        &mut self,
+        pc: &mut u64,
+        regs: &mut RegFile64,
+        fp: &mut FpRegisters,
+        mem: &mut Memory,
+    ) -> bool {
+        if self.len == 0 {
+            return false;
+        }
+        self.len -= 1;
+        self.head = (self.head + HISTORY_CAP - 1) % HISTORY_CAP;
+        let snap = self.buf[self.head].clone();
+        *pc = snap.pc;
+        regs.restore(&snap.regs);
+        fp.restore(&snap.fp);
+        mem.restore_mem_undo(&snap.mem_undo, snap.heap_ptr);
+        true
+    }
+
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+}
+
+impl Default for Backstepper64 {
     fn default() -> Self {
         Self::new()
     }

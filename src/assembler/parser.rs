@@ -42,6 +42,7 @@ pub enum DataItem {
     Byte(i8),
     Half(i16),
     Word(i32),
+    Dword(i64),
     Float(f32),
     Double(f64),
     String(String), // null-terminated (.string / .asciiz)
@@ -52,6 +53,7 @@ pub enum DataItem {
     Words(Vec<i32>),
     Halfs(Vec<i16>),
     Bytes(Vec<i8>),
+    Dwords(Vec<i64>),
 }
 
 #[derive(Debug, Clone)]
@@ -252,6 +254,16 @@ impl Parser {
                 let n = self.expect_int()? as u32;
                 self.expect_newline_or_eof()?;
                 Statement::Data(DataItem::Align(n), span.clone())
+            }
+
+            "dword" | "quad" => {
+                let vals = self.parse_int_list()?;
+                self.expect_newline_or_eof()?;
+                if vals.len() == 1 {
+                    Statement::Data(DataItem::Dword(vals[0]), span.clone())
+                } else {
+                    Statement::Data(DataItem::Dwords(vals), span.clone())
+                }
             }
 
             "equ" | "set" => {

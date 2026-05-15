@@ -15,8 +15,9 @@ use crate::hardware::{
     registers::REG_NAMES,
 };
 use crate::simulator::{
-    backstepper::Backstepper,
+    backstepper::{Backstepper, Backstepper64},
     engine::{self, CpuState, StepOutcome},
+    engine64::{self, CpuState64},
 };
 
 // ─── State enums ─────────────────────────────────────────────────────────────
@@ -58,6 +59,13 @@ enum RegisterTab {
     Float,
     Csr,
     Watches,
+}
+
+#[derive(PartialEq, Eq, Clone, Copy, Default)]
+enum XLen {
+    #[default]
+    Rv32,
+    Rv64,
 }
 
 // ─── Watch panel ─────────────────────────────────────────────────────────────
@@ -169,9 +177,12 @@ struct Tab {
     source: String,
     file_path: Option<PathBuf>,
     cpu: Option<CpuState>,
+    cpu64: Option<CpuState64>,
+    xlen: XLen,
     asm_out: Option<AssemblyOutput>,
     sim_state: SimState,
     backstepper: Backstepper,
+    backstepper64: Backstepper64,
     console_out: String,
     input_buf: String,
     input_queue: VecDeque<String>,
@@ -186,6 +197,7 @@ struct Tab {
     bp_cond_expr_input: String,
     prev_int_regs: [u32; 32],
     prev_fp_regs: [u64; 32],
+    prev_int_regs_64: [u64; 32],
     main_tab: MainTab,
     // Find / replace
     show_find: bool,
@@ -204,9 +216,12 @@ impl Tab {
             source: DEFAULT_SOURCE.to_owned(),
             file_path: None,
             cpu: None,
+            cpu64: None,
+            xlen: XLen::Rv32,
             asm_out: None,
             sim_state: SimState::Idle,
             backstepper: Backstepper::new(),
+            backstepper64: Backstepper64::new(),
             console_out: String::new(),
             input_buf: String::new(),
             input_queue: VecDeque::new(),
@@ -218,6 +233,7 @@ impl Tab {
             bp_cond_expr_input: String::new(),
             prev_int_regs: [0u32; 32],
             prev_fp_regs: [0u64; 32],
+            prev_int_regs_64: [0u64; 32],
             main_tab: MainTab::Editor,
             show_find: false,
             find_query: String::new(),
@@ -242,12 +258,27 @@ impl Tab {
         if let Some(cpu) = &self.cpu {
             self.prev_int_regs = cpu.regs.snapshot();
             self.prev_fp_regs = cpu.fp.snapshot();
+        } else if let Some(cpu) = &self.cpu64 {
+            self.prev_int_regs_64 = cpu.regs.snapshot();
+            self.prev_fp_regs = cpu.fp.snapshot();
         }
     }
 
     fn clear_prev_regs(&mut self) {
         self.prev_int_regs = [0u32; 32];
         self.prev_fp_regs = [0u64; 32];
+        self.prev_int_regs_64 = [0u64; 32];
+    }
+
+    fn is_assembled(&self) -> bool {
+        self.cpu.is_some() || self.cpu64.is_some()
+    }
+
+    fn can_backstep(&self) -> bool {
+        match self.xlen {
+            XLen::Rv32 => !self.backstepper.is_empty(),
+            XLen::Rv64 => !self.backstepper64.is_empty(),
+        }
     }
 
     // ── Actions ───────────────────────────────────────────────────────────────
@@ -290,8 +321,14 @@ impl Tab {
 
     fn do_export_binary(&mut self) {
         let Some(ref out) = self.asm_out else { return };
-        let Some(ref cpu) = self.cpu else { return };
-        let bytes = export::flat_binary(&cpu.mem, out.text_end);
+        let mem = if let Some(ref cpu) = self.cpu {
+            &cpu.mem
+        } else if let Some(ref cpu) = self.cpu64 {
+            &cpu.mem
+        } else {
+            return;
+        };
+        let bytes = export::flat_binary(mem, out.text_end);
         if let Some(path) = rfd::FileDialog::new()
             .add_filter("Binary", &["bin"])
             .set_file_name("program.bin")
@@ -305,8 +342,14 @@ impl Tab {
 
     fn do_export_elf(&mut self) {
         let Some(ref out) = self.asm_out else { return };
-        let Some(ref cpu) = self.cpu else { return };
-        let bytes = export::elf32(&cpu.mem, out.entry, out.text_end, out.data_end);
+        let mem = if let Some(ref cpu) = self.cpu {
+            &cpu.mem
+        } else if let Some(ref cpu) = self.cpu64 {
+            &cpu.mem
+        } else {
+            return;
+        };
+        let bytes = export::elf32(mem, out.entry, out.text_end, out.data_end);
         if let Some(path) = rfd::FileDialog::new()
             .add_filter("ELF", &["elf"])
             .set_file_name("program.elf")
@@ -329,30 +372,53 @@ impl Tab {
                 return false;
             }
         };
-        let mut cpu = CpuState::new(TEXT_BASE);
-        match codegen::assemble(&stmts, &mut cpu.mem) {
-            Err(e) => {
-                let msg = e.to_string();
-                let pos = parse_error_position(&msg);
-                self.sim_state = SimState::Error(msg, pos);
-                false
-            }
-            Ok(out) => {
-                cpu.pc = out.entry;
-                for &addr in &self.watchpoint_addrs {
-                    cpu.mem.add_watchpoint(addr);
+        if self.xlen == XLen::Rv64 {
+            let mut cpu = CpuState64::new(TEXT_BASE);
+            match codegen::assemble(&stmts, &mut cpu.mem) {
+                Err(e) => {
+                    let msg = e.to_string();
+                    let pos = parse_error_position(&msg);
+                    self.sim_state = SimState::Error(msg, pos);
+                    false
                 }
-                self.cpu = Some(cpu);
-                self.asm_out = Some(out);
-                self.sim_state = SimState::Ready;
-                self.main_tab = MainTab::TextSegment;
-                true
+                Ok(out) => {
+                    cpu.pc = out.entry as u64;
+                    for &addr in &self.watchpoint_addrs {
+                        cpu.mem.add_watchpoint(addr);
+                    }
+                    self.cpu64 = Some(cpu);
+                    self.asm_out = Some(out);
+                    self.sim_state = SimState::Ready;
+                    self.main_tab = MainTab::TextSegment;
+                    true
+                }
+            }
+        } else {
+            let mut cpu = CpuState::new(TEXT_BASE);
+            match codegen::assemble(&stmts, &mut cpu.mem) {
+                Err(e) => {
+                    let msg = e.to_string();
+                    let pos = parse_error_position(&msg);
+                    self.sim_state = SimState::Error(msg, pos);
+                    false
+                }
+                Ok(out) => {
+                    cpu.pc = out.entry;
+                    for &addr in &self.watchpoint_addrs {
+                        cpu.mem.add_watchpoint(addr);
+                    }
+                    self.cpu = Some(cpu);
+                    self.asm_out = Some(out);
+                    self.sim_state = SimState::Ready;
+                    self.main_tab = MainTab::TextSegment;
+                    true
+                }
             }
         }
     }
 
     fn do_run(&mut self) {
-        if self.cpu.is_some() {
+        if self.cpu.is_some() || self.cpu64.is_some() {
             self.sim_state = SimState::Running;
         }
     }
@@ -381,6 +447,29 @@ impl Tab {
                 }
             }
             update_call_stack_frames(&mut self.call_frames, saved_pc, instr_word);
+        } else if let Some(ref mut cpu) = self.cpu64 {
+            let saved_pc = cpu.pc;
+            let saved_regs = cpu.regs.snapshot();
+            let saved_fp = cpu.fp.snapshot();
+            self.prev_int_regs_64 = saved_regs;
+            self.prev_fp_regs = saved_fp;
+            let instr_word = cpu.mem.load_word(saved_pc as u32);
+            cpu.mem.begin_journal();
+            let outcome = engine64::step_one64(cpu, &mut self.console_out, &mut self.input_queue);
+            let (mem_undo, heap_ptr) = cpu.mem.end_journal();
+            let wp_hit = cpu.mem.take_watchpoint_hit();
+            self.backstepper64
+                .push(saved_pc, saved_regs, saved_fp, mem_undo, heap_ptr);
+            self.apply_outcome(outcome);
+            if matches!(self.sim_state, SimState::Running) {
+                self.sim_state = SimState::Paused;
+            }
+            if let Some(addr) = wp_hit {
+                if !matches!(self.sim_state, SimState::Halted(_) | SimState::Error(_, _)) {
+                    self.sim_state = SimState::WatchpointHit(addr);
+                }
+            }
+            update_call_stack_frames(&mut self.call_frames, saved_pc as u32, instr_word);
         }
     }
 
@@ -389,6 +478,13 @@ impl Tab {
             let word = cpu.mem.load_word(cpu.pc);
             if is_call_instr(word) {
                 Some(cpu.pc + 4)
+            } else {
+                None
+            }
+        } else if let Some(ref cpu) = self.cpu64 {
+            let word = cpu.mem.load_word(cpu.pc as u32);
+            if is_call_instr(word) {
+                Some(cpu.pc as u32 + 4)
             } else {
                 None
             }
@@ -402,9 +498,12 @@ impl Tab {
     }
 
     fn do_step_out(&mut self) {
-        let return_addr = match self.cpu.as_ref() {
-            Some(cpu) => cpu.regs.read(1), // ra = x1
-            None => return,
+        let return_addr = if let Some(cpu) = self.cpu.as_ref() {
+            cpu.regs.read(1) // ra = x1
+        } else if let Some(cpu) = self.cpu64.as_ref() {
+            cpu.regs.read(1) as u32
+        } else {
+            return;
         };
         self.sim_state = SimState::StepOut(return_addr);
     }
@@ -415,6 +514,15 @@ impl Tab {
             self.prev_fp_regs = cpu.fp.snapshot();
             if self
                 .backstepper
+                .pop(&mut cpu.pc, &mut cpu.regs, &mut cpu.fp, &mut cpu.mem)
+            {
+                self.sim_state = SimState::Paused;
+            }
+        } else if let Some(ref mut cpu) = self.cpu64 {
+            self.prev_int_regs_64 = cpu.regs.snapshot();
+            self.prev_fp_regs = cpu.fp.snapshot();
+            if self
+                .backstepper64
                 .pop(&mut cpu.pc, &mut cpu.regs, &mut cpu.fp, &mut cpu.mem)
             {
                 self.sim_state = SimState::Paused;
@@ -432,9 +540,11 @@ impl Tab {
 
     fn do_reset_state(&mut self) {
         self.cpu = None;
+        self.cpu64 = None;
         self.asm_out = None;
         self.sim_state = SimState::Idle;
         self.backstepper = Backstepper::new();
+        self.backstepper64 = Backstepper64::new();
         self.console_out.clear();
         self.input_queue.clear();
         self.input_buf.clear();
@@ -476,6 +586,26 @@ impl Tab {
                     }
                 }
                 (stop, cpu.pc, cpu.mem.load_word(cpu.pc))
+            } else if let Some(ref cpu) = self.cpu64 {
+                let pc32 = cpu.pc as u32;
+                let mut stop = false;
+                if let Some(target) = target_pc {
+                    if pc32 == target {
+                        stop = true;
+                    }
+                }
+                if !stop {
+                    if let Some(cond) = self.breakpoints.get(&pc32) {
+                        let hit = match cond {
+                            None => true,
+                            Some(expr) => eval_condition_64(expr, cpu),
+                        };
+                        if hit {
+                            stop = true;
+                        }
+                    }
+                }
+                (stop, pc32, cpu.mem.load_word(pc32))
             } else {
                 (false, 0, 0)
             };
@@ -487,6 +617,17 @@ impl Tab {
 
             if let Some(ref mut cpu) = self.cpu {
                 let outcome = engine::step_one(cpu, &mut self.console_out, &mut self.input_queue);
+                let wp_hit = cpu.mem.take_watchpoint_hit();
+                self.apply_outcome(outcome);
+                if let Some(addr) = wp_hit {
+                    if !matches!(self.sim_state, SimState::Halted(_) | SimState::Error(_, _)) {
+                        self.sim_state = SimState::WatchpointHit(addr);
+                    }
+                    return;
+                }
+            } else if let Some(ref mut cpu) = self.cpu64 {
+                let outcome =
+                    engine64::step_one64(cpu, &mut self.console_out, &mut self.input_queue);
                 let wp_hit = cpu.mem.take_watchpoint_hit();
                 self.apply_outcome(outcome);
                 if let Some(addr) = wp_hit {
@@ -926,7 +1067,12 @@ impl Tab {
     }
 
     fn show_data_segment(&mut self, ui: &mut egui::Ui) {
-        let Some(cpu) = &self.cpu else {
+        let mem: Option<&crate::hardware::memory::Memory> = self
+            .cpu
+            .as_ref()
+            .map(|c| &c.mem)
+            .or_else(|| self.cpu64.as_ref().map(|c| &c.mem));
+        let Some(mem) = mem else {
             ui.centered_and_justified(|ui| {
                 ui.label("Assemble first to view the data segment.");
             });
@@ -943,7 +1089,7 @@ impl Tab {
         let mut display_rows: Vec<(u32, [u32; 4])> = Vec::new();
         let mut addr = DATA_BASE;
         while addr < HEAP_BASE {
-            let words: [u32; 4] = std::array::from_fn(|j| cpu.mem.load_word(addr + j as u32 * 4));
+            let words: [u32; 4] = std::array::from_fn(|j| mem.load_word(addr + j as u32 * 4));
             let has_label = addr_to_labels.contains_key(&addr)
                 || addr_to_labels.contains_key(&(addr + 4))
                 || addr_to_labels.contains_key(&(addr + 8))
@@ -1027,7 +1173,7 @@ impl Tab {
                     }
                     row.col(|ui| {
                         let ascii: String = (0..16u32)
-                            .map(|j| cpu.mem.load_byte(row_addr + j))
+                            .map(|j| mem.load_byte(row_addr + j))
                             .map(|b| {
                                 if (32..127).contains(&b) {
                                     b as char
@@ -1043,14 +1189,17 @@ impl Tab {
     }
 
     fn show_stack_viewer(&mut self, ui: &mut egui::Ui) {
-        let Some(cpu) = &self.cpu else {
+        let stack_data: Option<(&crate::hardware::memory::Memory, u32)> = self
+            .cpu
+            .as_ref()
+            .map(|c| (&c.mem, c.regs.read(2)))
+            .or_else(|| self.cpu64.as_ref().map(|c| (&c.mem, c.regs.read(2) as u32)));
+        let Some((mem, sp)) = stack_data else {
             ui.centered_and_justified(|ui| {
                 ui.label("Assemble first to view the stack.");
             });
             return;
         };
-
-        let sp = cpu.regs.read(2);
 
         const WORD_ROWS: u32 = 80;
         let view_top = STACK_TOP.saturating_sub((WORD_ROWS - 16) * 4) & !0x3;
@@ -1089,7 +1238,7 @@ impl Tab {
                         row.col(|_| {});
                         return;
                     }
-                    let val = cpu.mem.load_word(addr);
+                    let val = mem.load_word(addr);
                     let is_sp = addr == sp;
                     let used = addr >= sp;
                     let addr_color = if is_sp {
@@ -1102,7 +1251,7 @@ impl Tab {
 
                     row.col(|ui| {
                         if is_sp {
-                            ui.label(RichText::new("sp→").small().color(egui::Color32::YELLOW));
+                            ui.label(RichText::new("sp>").small().color(egui::Color32::YELLOW));
                         }
                     });
                     row.col(|ui| {
@@ -1139,7 +1288,11 @@ impl Tab {
     }
 
     fn show_text_segment(&mut self, ui: &mut egui::Ui) {
-        let current_pc = self.cpu.as_ref().map(|c| c.pc);
+        let current_pc = self
+            .cpu
+            .as_ref()
+            .map(|c| c.pc)
+            .or_else(|| self.cpu64.as_ref().map(|c| c.pc as u32));
         let source_lines: Vec<&str> = self.source.lines().collect();
 
         if self.asm_out.is_none() {
@@ -1214,7 +1367,22 @@ impl Tab {
                             }
                         }
                         if hot {
-                            ui.label(RichText::new("→").color(egui::Color32::YELLOW));
+                            let (rect, _) = ui.allocate_exact_size(
+                                egui::vec2(14.0, 18.0),
+                                egui::Sense::hover(),
+                            );
+                            let my = rect.center().y;
+                            let x0 = rect.left() + 1.0;
+                            let x1 = rect.right() - 1.0;
+                            ui.painter().add(egui::Shape::convex_polygon(
+                                vec![
+                                    egui::pos2(x0, my - 5.0),
+                                    egui::pos2(x1, my),
+                                    egui::pos2(x0, my + 5.0),
+                                ],
+                                egui::Color32::YELLOW,
+                                egui::Stroke::NONE,
+                            ));
                         }
                     });
 
@@ -1257,7 +1425,12 @@ impl Tab {
     }
 
     fn show_call_stack(&self, ui: &mut egui::Ui) {
-        let Some(cpu) = &self.cpu else {
+        let current_pc: Option<u32> = self
+            .cpu
+            .as_ref()
+            .map(|c| c.pc)
+            .or_else(|| self.cpu64.as_ref().map(|c| c.pc as u32));
+        let Some(pc) = current_pc else {
             ui.centered_and_justified(|ui| {
                 ui.label("Assemble first to see the call stack.");
             });
@@ -1285,7 +1458,7 @@ impl Tab {
             .auto_shrink([false; 2])
             .show(ui, |ui| {
                 ui.label(
-                    RichText::new(format!("→ {}  ({:#010x})", fn_name_at(cpu.pc), cpu.pc))
+                    RichText::new(format!("> {}  ({:#010x})", fn_name_at(pc), pc))
                         .monospace()
                         .color(egui::Color32::YELLOW),
                 );
@@ -1528,7 +1701,7 @@ impl OarsApp {
 
     fn show_toolbar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            let assembled = self.tabs[self.active].cpu.is_some();
+            let assembled = self.tabs[self.active].is_assembled();
             let running = matches!(
                 self.tabs[self.active].sim_state,
                 SimState::Running | SimState::StepOver(_) | SimState::StepOut(_)
@@ -1538,12 +1711,12 @@ impl OarsApp {
                 SimState::WaitingInput | SimState::WaitingChar
             );
             let steppable = assembled && !running && !waiting;
-            let can_back = assembled && !running && !self.tabs[self.active].backstepper.is_empty();
+            let can_back = assembled && !running && self.tabs[self.active].can_backstep();
 
             if ui.button("Assemble").clicked() {
                 self.tabs[self.active].do_assemble();
             }
-            let can_run = self.tabs[self.active].cpu.is_some()
+            let can_run = self.tabs[self.active].is_assembled()
                 && !matches!(
                     self.tabs[self.active].sim_state,
                     SimState::Running
@@ -1644,56 +1817,104 @@ impl OarsApp {
             .auto_shrink([false; 2])
             .show(ui, |ui| match self.register_tab {
                 RegisterTab::Integer => {
-                    let vals: Vec<u32> = (0..32)
-                        .map(|i| {
-                            self.tabs[self.active]
-                                .cpu
-                                .as_ref()
-                                .map_or(0, |c| c.regs.read(i))
-                        })
-                        .collect();
-                    let prev = self.tabs[self.active].prev_int_regs;
-                    egui::Grid::new("int_regs")
-                        .num_columns(4)
-                        .spacing([6.0, 1.0])
-                        .striped(true)
-                        .show(ui, |ui| {
-                            ui.weak("Num");
-                            ui.weak("Name");
-                            ui.weak("Hex");
-                            ui.weak("Dec");
-                            ui.end_row();
-                            for (i, name) in REG_NAMES.iter().enumerate() {
-                                let val = vals[i];
-                                let changed = val != prev[i];
-                                let color = if changed && i != 0 {
-                                    CHANGED_COLOR
-                                } else {
-                                    egui::Color32::GRAY
-                                };
-                                ui.label(
-                                    RichText::new(format!("x{i:02}")).monospace().color(color),
-                                );
-                                ui.label(RichText::new(*name).monospace().color(color));
-                                ui.label(
-                                    RichText::new(format!("{val:#010x}"))
-                                        .monospace()
-                                        .color(color),
-                                );
-                                ui.label(
-                                    RichText::new(format!("{}", val as i32))
-                                        .monospace()
-                                        .color(color),
-                                );
+                    let tab = &self.tabs[self.active];
+                    if tab.xlen == XLen::Rv64 {
+                        let vals: Vec<u64> = (0..32)
+                            .map(|i| tab.cpu64.as_ref().map_or(0, |c| c.regs.read(i)))
+                            .collect();
+                        let prev = tab.prev_int_regs_64;
+                        egui::Grid::new("int_regs")
+                            .num_columns(4)
+                            .spacing([6.0, 1.0])
+                            .striped(true)
+                            .show(ui, |ui| {
+                                ui.weak("Num");
+                                ui.weak("Name");
+                                ui.weak("Hex");
+                                ui.weak("Dec");
                                 ui.end_row();
-                            }
-                        });
+                                for (i, name) in REG_NAMES.iter().enumerate() {
+                                    let val = vals[i];
+                                    let changed = val != prev[i];
+                                    let color = if changed && i != 0 {
+                                        CHANGED_COLOR
+                                    } else {
+                                        egui::Color32::GRAY
+                                    };
+                                    ui.label(
+                                        RichText::new(format!("x{i:02}")).monospace().color(color),
+                                    );
+                                    ui.label(RichText::new(*name).monospace().color(color));
+                                    ui.label(
+                                        RichText::new(format!(
+                                            "0x{:08x} {:08x}",
+                                            (val >> 32) as u32,
+                                            val as u32
+                                        ))
+                                        .monospace()
+                                        .color(color),
+                                    );
+                                    ui.label(
+                                        RichText::new(format!("{}", val as i64))
+                                            .monospace()
+                                            .color(color),
+                                    );
+                                    ui.end_row();
+                                }
+                            });
+                    } else {
+                        let vals: Vec<u32> = (0..32)
+                            .map(|i| tab.cpu.as_ref().map_or(0, |c| c.regs.read(i)))
+                            .collect();
+                        let prev = tab.prev_int_regs;
+                        egui::Grid::new("int_regs")
+                            .num_columns(4)
+                            .spacing([6.0, 1.0])
+                            .striped(true)
+                            .show(ui, |ui| {
+                                ui.weak("Num");
+                                ui.weak("Name");
+                                ui.weak("Hex");
+                                ui.weak("Dec");
+                                ui.end_row();
+                                for (i, name) in REG_NAMES.iter().enumerate() {
+                                    let val = vals[i];
+                                    let changed = val != prev[i];
+                                    let color = if changed && i != 0 {
+                                        CHANGED_COLOR
+                                    } else {
+                                        egui::Color32::GRAY
+                                    };
+                                    ui.label(
+                                        RichText::new(format!("x{i:02}")).monospace().color(color),
+                                    );
+                                    ui.label(RichText::new(*name).monospace().color(color));
+                                    ui.label(
+                                        RichText::new(format!("{val:#010x}"))
+                                            .monospace()
+                                            .color(color),
+                                    );
+                                    ui.label(
+                                        RichText::new(format!("{}", val as i32))
+                                            .monospace()
+                                            .color(color),
+                                    );
+                                    ui.end_row();
+                                }
+                            });
+                    }
                 }
                 RegisterTab::Float => {
                     let fp_snap: [u64; 32] = self.tabs[self.active]
                         .cpu
                         .as_ref()
                         .map(|c| c.fp.snapshot())
+                        .or_else(|| {
+                            self.tabs[self.active]
+                                .cpu64
+                                .as_ref()
+                                .map(|c| c.fp.snapshot())
+                        })
                         .unwrap_or([0u64; 32]);
                     let prev = self.tabs[self.active].prev_fp_regs;
                     egui::Grid::new("fp_regs")
@@ -1734,7 +1955,13 @@ impl OarsApp {
                         });
                 }
                 RegisterTab::Csr => {
-                    let pc = self.tabs[self.active].cpu.as_ref().map_or(0u32, |c| c.pc);
+                    let tab = &self.tabs[self.active];
+                    let pc = tab
+                        .cpu
+                        .as_ref()
+                        .map(|c| c.pc)
+                        .or_else(|| tab.cpu64.as_ref().map(|c| c.pc as u32))
+                        .unwrap_or(0);
                     let csr_vals: Vec<u32> = {
                         let addrs: &[u32] = &[
                             u32::MAX,
@@ -1751,10 +1978,11 @@ impl OarsApp {
                                 if a == u32::MAX {
                                     pc
                                 } else {
-                                    self.tabs[self.active]
-                                        .cpu
+                                    tab.cpu
                                         .as_ref()
-                                        .map_or(0, |c| c.csr.read(a))
+                                        .map(|c| c.csr.read(a))
+                                        .or_else(|| tab.cpu64.as_ref().map(|c| c.csr.read(a)))
+                                        .unwrap_or(0)
                                 }
                             })
                             .collect()
@@ -1828,11 +2056,31 @@ impl OarsApp {
             .watches
             .iter()
             .map(|watch| {
-                if let Some(cpu) = &self.tabs[self.active].cpu {
+                let tab = &self.tabs[self.active];
+                if let Some(cpu) = &tab.cpu {
                     match &watch.target {
                         WatchTarget::IntReg(idx) => {
                             let v = cpu.regs.read(*idx);
                             (format!("{v:#010x}"), format!("{}", v as i32))
+                        }
+                        WatchTarget::FpReg(idx) => {
+                            let raw = cpu.fp.snapshot()[*idx];
+                            let f = f64::from_bits(raw);
+                            (format!("{raw:#018x}"), format!("{f:.6}"))
+                        }
+                        WatchTarget::Mem(addr) => {
+                            let v = cpu.mem.load_word(*addr);
+                            (format!("{v:#010x}"), format!("{}", v as i32))
+                        }
+                    }
+                } else if let Some(cpu) = &tab.cpu64 {
+                    match &watch.target {
+                        WatchTarget::IntReg(idx) => {
+                            let v = cpu.regs.read(*idx);
+                            (
+                                format!("0x{:08x} {:08x}", (v >> 32) as u32, v as u32),
+                                format!("{}", v as i64),
+                            )
                         }
                         WatchTarget::FpReg(idx) => {
                             let raw = cpu.fp.snapshot()[*idx];
@@ -1908,9 +2156,18 @@ impl OarsApp {
         const ROWS: usize = 512;
         const BYTES_PER_ROW: u32 = 16;
 
-        if let Some(cpu) = &self.tabs[self.active].cpu {
+        let mem_and_pc: Option<(&crate::hardware::memory::Memory, u32)> = {
+            let tab = &self.tabs[self.active];
+            if let Some(cpu) = &tab.cpu {
+                Some((&cpu.mem, cpu.pc))
+            } else if let Some(cpu) = &tab.cpu64 {
+                Some((&cpu.mem, cpu.pc as u32))
+            } else {
+                None
+            }
+        };
+        if let Some((mem, current_pc)) = mem_and_pc {
             let base = self.mem_view_base;
-            let current_pc = cpu.pc;
 
             TableBuilder::new(ui)
                 .striped(true)
@@ -1946,7 +2203,7 @@ impl OarsApp {
                         let i = row.index();
                         let row_addr = base.wrapping_add(i as u32 * BYTES_PER_ROW);
                         let words: [u32; 4] =
-                            std::array::from_fn(|j| cpu.mem.load_word(row_addr + j as u32 * 4));
+                            std::array::from_fn(|j| mem.load_word(row_addr + j as u32 * 4));
                         let hot = current_pc >= row_addr
                             && current_pc < row_addr.wrapping_add(BYTES_PER_ROW);
                         let addr_color = if hot {
@@ -1969,7 +2226,7 @@ impl OarsApp {
                         }
                         row.col(|ui| {
                             let ascii: String = (0..16u32)
-                                .map(|j| cpu.mem.load_byte(row_addr + j))
+                                .map(|j| mem.load_byte(row_addr + j))
                                 .map(|b| {
                                     if (32..127).contains(&b) {
                                         b as char
@@ -2041,6 +2298,55 @@ fn parse_u32_val(s: &str) -> Option<u32> {
         u32::from_str_radix(&clean, 16).ok()
     } else {
         s.parse::<i32>().ok().map(|v| v as u32)
+    }
+}
+
+fn eval_condition_64(expr: &str, cpu: &crate::simulator::engine64::CpuState64) -> bool {
+    for op in &["==", "!=", "<=", ">=", "<", ">"] {
+        if let Some(pos) = expr.find(op) {
+            let lhs = expr[..pos].trim();
+            let rhs = expr[pos + op.len()..].trim();
+            if let (Some(l), Some(r)) = (read_reg_val_64(lhs, cpu), parse_u64_val(rhs)) {
+                return match *op {
+                    "==" => l == r,
+                    "!=" => l != r,
+                    "<" => (l as i64) < (r as i64),
+                    ">" => (l as i64) > (r as i64),
+                    "<=" => (l as i64) <= (r as i64),
+                    ">=" => (l as i64) >= (r as i64),
+                    _ => true,
+                };
+            }
+        }
+    }
+    true
+}
+
+fn read_reg_val_64(s: &str, cpu: &crate::simulator::engine64::CpuState64) -> Option<u64> {
+    use crate::hardware::registers::REG_NAMES;
+    let s = s.trim().to_lowercase();
+    for (i, name) in REG_NAMES.iter().enumerate() {
+        if s == *name {
+            return Some(cpu.regs.read(i));
+        }
+    }
+    if let Some(rest) = s.strip_prefix('x') {
+        if let Ok(n) = rest.parse::<usize>() {
+            if n < 32 {
+                return Some(cpu.regs.read(n));
+            }
+        }
+    }
+    parse_u64_val(&s)
+}
+
+fn parse_u64_val(s: &str) -> Option<u64> {
+    let s = s.trim();
+    if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+        let clean: String = hex.chars().filter(|&c| c != '_').collect();
+        u64::from_str_radix(&clean, 16).ok()
+    } else {
+        s.parse::<i64>().ok().map(|v| v as u64)
     }
 }
 
@@ -3150,6 +3456,20 @@ impl eframe::App for OarsApp {
                     };
                     if ui.button(label).clicked() {
                         self.dark_mode = !self.dark_mode;
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                    let xlen_label = match self.tabs[self.active].xlen {
+                        XLen::Rv32 => "Switch to RV64I (64-bit)",
+                        XLen::Rv64 => "Switch to RV32I (32-bit)",
+                    };
+                    if ui.button(xlen_label).clicked() {
+                        let next = match self.tabs[self.active].xlen {
+                            XLen::Rv32 => XLen::Rv64,
+                            XLen::Rv64 => XLen::Rv32,
+                        };
+                        self.tabs[self.active].xlen = next;
+                        self.tabs[self.active].do_reset_state();
                         ui.close_menu();
                     }
                 });

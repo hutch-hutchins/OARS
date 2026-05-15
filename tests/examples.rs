@@ -1,4 +1,4 @@
-/// Integration tests for the example programs in examples/asm/.
+/// Integration tests for the RV32I example programs in examples/32bit/.
 ///
 /// Each test assembles a .s file through the OARS assembler, runs it with the
 /// simulator engine, and checks the expected output.
@@ -11,7 +11,7 @@ use std::path::Path;
 
 fn run_example(name: &str) -> (String, i32) {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("examples/asm")
+        .join("examples/32bit")
         .join(name);
     let src = std::fs::read_to_string(&path).unwrap_or_else(|_| panic!("cannot read {name}"));
     let stmts = parser::parse(&src).unwrap_or_else(|e| panic!("parse error in {name}: {e}"));

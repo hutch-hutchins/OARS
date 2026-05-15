@@ -59,17 +59,19 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path staging | Out-Null
+          New-Item -ItemType Directory -Force -Path staging\examples | Out-Null
           Copy-Item "target\${{ matrix.target }}\release\${{ matrix.binary }}" staging\
-          Copy-Item -Recurse examples\asm staging\examples
+          Copy-Item -Recurse examples\32bit staging\examples\32bit
+          Copy-Item -Recurse examples\64bit staging\examples\64bit
           Compress-Archive -Path staging\* -DestinationPath "${{ matrix.archive }}"
 
       - name: Package (Unix)
         if: runner.os != 'Windows'
         run: |
-          mkdir staging
+          mkdir -p staging/examples
           cp "target/${{ matrix.target }}/release/${{ matrix.binary }}" staging/
-          cp -r examples/asm staging/examples
+          cp -r examples/32bit staging/examples/32bit
+          cp -r examples/64bit staging/examples/64bit
           tar czf "${{ matrix.archive }}" -C staging .
 
       # Each build job creates/updates the release directly so there is no

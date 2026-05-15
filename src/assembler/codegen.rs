@@ -125,7 +125,7 @@ fn data_item_size(item: &DataItem) -> u32 {
         DataItem::Byte(_) => 1,
         DataItem::Half(_) => 2,
         DataItem::Word(_) | DataItem::Float(_) => 4,
-        DataItem::Double(_) => 8,
+        DataItem::Dword(_) | DataItem::Double(_) => 8,
         DataItem::String(s) => s.len() as u32 + 1,
         DataItem::Ascii(s) => s.len() as u32,
         DataItem::Space(n) => *n,
@@ -133,6 +133,7 @@ fn data_item_size(item: &DataItem) -> u32 {
         DataItem::Words(v) => v.len() as u32 * 4,
         DataItem::Halfs(v) => v.len() as u32 * 2,
         DataItem::Bytes(v) => v.len() as u32,
+        DataItem::Dwords(v) => v.len() as u32 * 8,
     }
 }
 
@@ -201,6 +202,18 @@ fn emit_data(item: &DataItem, addr: u32, mem: &mut Memory) -> u32 {
             mem.store_word(addr, bits as u32);
             mem.store_word(addr + 4, (bits >> 32) as u32);
             addr + 8
+        }
+        DataItem::Dword(v) => {
+            mem.store_doubleword(addr, *v as u64);
+            addr + 8
+        }
+        DataItem::Dwords(vals) => {
+            let mut a = addr;
+            for v in vals {
+                mem.store_doubleword(a, *v as u64);
+                a += 8;
+            }
+            a
         }
         DataItem::String(s) => {
             let b = s.as_bytes();
@@ -485,9 +498,9 @@ fn encode_real(
         "xori" => f::enc_i(0x13, 0x4, reg(0)?, reg(1)?, imm(2)?),
         "ori" => f::enc_i(0x13, 0x6, reg(0)?, reg(1)?, imm(2)?),
         "andi" => f::enc_i(0x13, 0x7, reg(0)?, reg(1)?, imm(2)?),
-        "slli" => f::enc_i(0x13, 0x1, reg(0)?, reg(1)?, imm(2)? & 0x1F),
-        "srli" => f::enc_i(0x13, 0x5, reg(0)?, reg(1)?, imm(2)? & 0x1F),
-        "srai" => f::enc_i(0x13, 0x5, reg(0)?, reg(1)?, (imm(2)? & 0x1F) | (0x20 << 5)),
+        "slli" => f::enc_i(0x13, 0x1, reg(0)?, reg(1)?, imm(2)? & 0x3F),
+        "srli" => f::enc_i(0x13, 0x5, reg(0)?, reg(1)?, imm(2)? & 0x3F),
+        "srai" => f::enc_i(0x13, 0x5, reg(0)?, reg(1)?, (imm(2)? & 0x3F) | (0x20 << 5)),
 
         // ── Integer loads ─────────────────────────────────────────────────────
         "lb" => f::enc_i(0x03, 0x0, reg(0)?, base(1)?, imm(1)?),
@@ -495,11 +508,29 @@ fn encode_real(
         "lw" => f::enc_i(0x03, 0x2, reg(0)?, base(1)?, imm(1)?),
         "lbu" => f::enc_i(0x03, 0x4, reg(0)?, base(1)?, imm(1)?),
         "lhu" => f::enc_i(0x03, 0x5, reg(0)?, base(1)?, imm(1)?),
+        // RV64I loads
+        "ld" => f::enc_i(0x03, 0x3, reg(0)?, base(1)?, imm(1)?),
+        "lwu" => f::enc_i(0x03, 0x6, reg(0)?, base(1)?, imm(1)?),
 
         // ── Integer stores ────────────────────────────────────────────────────
         "sb" => f::enc_s(0x0, base(1)?, reg(0)?, imm(1)?),
         "sh" => f::enc_s(0x1, base(1)?, reg(0)?, imm(1)?),
         "sw" => f::enc_s(0x2, base(1)?, reg(0)?, imm(1)?),
+        // RV64I store
+        "sd" => f::enc_s(0x3, base(1)?, reg(0)?, imm(1)?),
+
+        // ── RV64I W-suffix I-type (opcode 0x1B) ──────────────────────────────
+        "addiw" => f::enc_i(0x1B, 0x0, reg(0)?, reg(1)?, imm(2)?),
+        "slliw" => f::enc_i(0x1B, 0x1, reg(0)?, reg(1)?, imm(2)? & 0x1F),
+        "srliw" => f::enc_i(0x1B, 0x5, reg(0)?, reg(1)?, imm(2)? & 0x1F),
+        "sraiw" => f::enc_i(0x1B, 0x5, reg(0)?, reg(1)?, (imm(2)? & 0x1F) | (0x20 << 5)),
+
+        // ── RV64I W-suffix R-type (opcode 0x3B) ──────────────────────────────
+        "addw" => f::enc_r(0x3B, 0x0, 0x00, reg(0)?, reg(1)?, reg(2)?),
+        "subw" => f::enc_r(0x3B, 0x0, 0x20, reg(0)?, reg(1)?, reg(2)?),
+        "sllw" => f::enc_r(0x3B, 0x1, 0x00, reg(0)?, reg(1)?, reg(2)?),
+        "srlw" => f::enc_r(0x3B, 0x5, 0x00, reg(0)?, reg(1)?, reg(2)?),
+        "sraw" => f::enc_r(0x3B, 0x5, 0x20, reg(0)?, reg(1)?, reg(2)?),
 
         // ── Branches ──────────────────────────────────────────────────────────
         "beq" => f::enc_b(0x0, reg(0)?, reg(1)?, imm(2)?),

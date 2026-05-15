@@ -226,7 +226,7 @@ fn expand_li(rd: Operand, imm: i32) -> Vec<RealInstr> {
     } else {
         // upper20 rounded so that sign-extended lower12 adds correctly
         let upper = ((imm as u32).wrapping_add(0x800)) >> 12;
-        let lower = imm - ((upper as i32) << 12);
+        let lower = (imm as i64 - ((upper as i64) << 12)) as i32;
         vec![
             RealInstr::new("lui", vec![rd.clone(), Operand::Imm(upper as i32)]),
             RealInstr::new("addi", vec![rd.clone(), rd, Operand::Imm(lower)]),

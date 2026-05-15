@@ -120,6 +120,28 @@ impl Memory {
         self.store_byte(addr + 3, (val >> 24) as u8);
     }
 
+    pub fn load_doubleword(&self, addr: u32) -> u64 {
+        (self.load_byte(addr) as u64)
+            | ((self.load_byte(addr + 1) as u64) << 8)
+            | ((self.load_byte(addr + 2) as u64) << 16)
+            | ((self.load_byte(addr + 3) as u64) << 24)
+            | ((self.load_byte(addr + 4) as u64) << 32)
+            | ((self.load_byte(addr + 5) as u64) << 40)
+            | ((self.load_byte(addr + 6) as u64) << 48)
+            | ((self.load_byte(addr + 7) as u64) << 56)
+    }
+
+    pub fn store_doubleword(&mut self, addr: u32, val: u64) {
+        self.store_byte(addr, val as u8);
+        self.store_byte(addr + 1, (val >> 8) as u8);
+        self.store_byte(addr + 2, (val >> 16) as u8);
+        self.store_byte(addr + 3, (val >> 24) as u8);
+        self.store_byte(addr + 4, (val >> 32) as u8);
+        self.store_byte(addr + 5, (val >> 40) as u8);
+        self.store_byte(addr + 6, (val >> 48) as u8);
+        self.store_byte(addr + 7, (val >> 56) as u8);
+    }
+
     pub fn write_bytes(&mut self, addr: u32, bytes: &[u8]) {
         for (i, &b) in bytes.iter().enumerate() {
             self.store_byte(addr + i as u32, b);

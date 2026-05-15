@@ -277,10 +277,28 @@ The binary will be at `target/release/oars` (or `oars.exe` on Windows).
 - [x] 11 ready-to-run example programs in `examples/asm/` covering RV32M, RV32F, RV32D, Zicsr, and interactive console I/O
 - [x] Integration test suite — 10 tests, all passing
 
+### v0.7.0 — In Development
+
+#### RV64I Engine
+
+- [x] **RV64I 64-bit mode** — selectable per-tab (32-bit default); separate `CpuState64` / `engine64` with full 64-bit registers, 64-bit ALU, and 64-bit memory operations
+- [x] **RV64I instruction support** — `ld`, `sd`, `lwu`; `addiw`, `slliw`, `srliw`, `sraiw`; `addw`, `subw`, `sllw`, `srlw`, `sraw`; `mulhu` with 128-bit product; 6-bit shamt for `slli`/`srli`/`srai`
+- [x] **`.dword` / `.quad` directive** — emit 64-bit values in `.data` sections
+- [x] **64-bit register display** — integer registers shown as `0x00000000 00000000` with a space at the 32/64-bit boundary for easy reading
+
+#### GUI
+
+- [x] **PC indicator arrow** — replaced the Unicode `→` character (missing from egui's bundled font, rendered as a yellow box) with a painted filled triangle; always renders correctly regardless of font
+
+#### v0.7.0 Examples & Tests
+
+- [x] **Examples reorganised** — `examples/asm/` split into `examples/32bit/` (17 RV32 programs) and `examples/64bit/` (10 RV64 programs)
+- [x] **10 RV64 examples** — programs that genuinely require 64-bit arithmetic: `gauss_sum64.s` (5 billion sum), `sum_cubes64.s` (250 billion sum), `fibonacci_big64.s` (F(50) > 2^32), `mulhi64.s` (MULHU / 128-bit overflow), `count_bits64.s` (popcount via Kernighan), `word_ops64.s` (W-suffix overflow demo), `big_mul64.s`, `array64.s`, `fibonacci64.s`, `hello64.s`
+- [x] **Release archives include examples** — GitHub Actions packages `examples/32bit/` and `examples/64bit/` alongside the binary
+- [x] Integration test suite grown to 27 tests (17 RV32 + 10 RV64), all passing
+
 ### Future
 
-- [ ] Release archives include an `examples/` folder with all ready-to-run example programs
-- [ ] RV64I 64-bit mode
 - [ ] Multi-file / include support (`.include` directive)
 - [ ] Autocomplete tab-stop navigation through all operand placeholders
 - [ ] Disassembler view — decode arbitrary memory regions back to mnemonics
