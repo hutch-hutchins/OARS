@@ -1,4 +1,5 @@
 use crate::assembler::{codegen, include, parser};
+use crate::hardware::memory::TEXT_BASE;
 use crate::simulator::engine::{self, CpuState};
 use anyhow::{Context, Result};
 use clap::{Args, Parser};
@@ -52,11 +53,11 @@ pub fn run_headless(path: PathBuf, opts: &RunOpts) -> Result<()> {
         .with_context(|| format!("include error in {}", path.display()))?;
 
     // Assemble into a fresh memory image
-    let mut cpu = CpuState::new(crate::hardware::memory::TEXT_BASE);
+    let mut cpu = CpuState::new(TEXT_BASE);
     let out = codegen::assemble(&stmts, &mut cpu.mem)
         .with_context(|| format!("assembly error in {}", path.display()))?;
 
-    cpu.pc = out.entry;
+    cpu.pc = initial_pc(out.entry, opts);
 
     // Run
     let mut stdout = io::stdout();
@@ -86,4 +87,34 @@ pub fn run_headless(path: PathBuf, opts: &RunOpts) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn initial_pc(assembled_entry: u32, opts: &RunOpts) -> u32 {
+    if opts.start_at_main {
+        assembled_entry
+    } else {
+        TEXT_BASE
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_start_pc_is_first_text_instruction() {
+        let opts = RunOpts::default();
+
+        assert_eq!(initial_pc(TEXT_BASE + 0x20, &opts), TEXT_BASE);
+    }
+
+    #[test]
+    fn start_at_main_uses_assembled_entry() {
+        let opts = RunOpts {
+            start_at_main: true,
+            ..RunOpts::default()
+        };
+
+        assert_eq!(initial_pc(TEXT_BASE + 0x20, &opts), TEXT_BASE + 0x20);
+    }
 }

@@ -38,10 +38,10 @@ fn include_demo_math() {
     assert_eq!(code, 0);
     let lines: Vec<&str> = out.lines().collect();
     assert_eq!(lines.len(), 4, "expected 4 output lines: {out:?}");
-    assert_eq!(lines[0], "6",    "gcd(48,18) wrong: {out:?}");
-    assert_eq!(lines[1], "25",   "gcd(100,75) wrong: {out:?}");
+    assert_eq!(lines[0], "6", "gcd(48,18) wrong: {out:?}");
+    assert_eq!(lines[1], "25", "gcd(100,75) wrong: {out:?}");
     assert_eq!(lines[2], "1024", "2^10 wrong: {out:?}");
-    assert_eq!(lines[3], "243",  "3^5 wrong: {out:?}");
+    assert_eq!(lines[3], "243", "3^5 wrong: {out:?}");
 }
 
 // ── string_lib.s: str_len and str_upper via .include ─────────────────────────
@@ -52,6 +52,6 @@ fn include_demo_strings() {
     assert_eq!(code, 0);
     let lines: Vec<&str> = out.lines().collect();
     assert_eq!(lines.len(), 2, "expected 2 output lines: {out:?}");
-    assert_eq!(lines[0], "13",             "strlen wrong: {out:?}");
+    assert_eq!(lines[0], "13", "strlen wrong: {out:?}");
     assert_eq!(lines[1], "HELLO, WORLD!", "str_upper wrong: {out:?}");
 }

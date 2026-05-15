@@ -101,23 +101,23 @@ oars program.s --telemetry            # emit instruction count + exit code as JS
 
 ## Example Programs
 
-Ready-to-run examples in [`examples/asm/`](examples/asm/) cover the advanced instruction extensions:
+Ready-to-run examples in [`examples/32bit/`](examples/32bit/) cover the advanced instruction extensions:
 
 | File | Extensions used | What it does |
 | --- | --- | --- |
-| [`gcd.s`](examples/asm/gcd.s) | RV32M — `rem` | Euclidean GCD algorithm: `gcd(48, 18) = 6` |
-| [`integer_power.s`](examples/asm/integer_power.s) | RV32M — `mul`, `mulh`, `mulhu` | Exponentiation by squaring; `mulhu` overflow detection |
-| [`quadratic.s`](examples/asm/quadratic.s) | RV32F — `flw`, `fmul.s`, `fsub.s`, `fsqrt.s`, `fdiv.s`, `fneg.s`, `flt.s`, `fcvt.s.w` | Quadratic formula solver: roots of x²−5x+6=0 |
-| [`dot_product.s`](examples/asm/dot_product.s) | RV32F — `fmadd.s`, `flw` | Dot product using fused multiply-add (FMA) |
-| [`newton_sqrt.s`](examples/asm/newton_sqrt.s) | RV32D — `fld`, `fadd.d`, `fmul.d`, `fdiv.d`, `fabs.d`, `fsqrt.d` | Newton-Raphson sqrt(2) compared to hardware `fsqrt.d` |
-| [`csr_benchmark.s`](examples/asm/csr_benchmark.s) | Zicsr — `csrr instret`; RV32M — `mul` | Instruction-count benchmarking: loop vs. Gauss formula |
-| [`stack_frame.s`](examples/asm/stack_frame.s) | ABI — `call`/`ret`, callee-saved regs, stack frame | `sum_of_squares(5) = 55` via a fully ABI-compliant subroutine |
-| [`factorial.s`](examples/asm/factorial.s) | ABI — recursive calls, `sw`/`lw` on stack | Recursive `10! = 3628800`; demonstrates saving `ra` and `a0` across calls |
-| [`heap_alloc.s`](examples/asm/heap_alloc.s) | Syscall 9 — `sbrk` | Dynamic heap allocation: fill and print an 8-element array |
-| [`linked_list.s`](examples/asm/linked_list.s) | Syscall 9 — `sbrk`, `lb`/`sb`, pointer chasing | Singly linked list: allocate nodes, link them, traverse and print |
-| [`string_ops.s`](examples/asm/string_ops.s) | `lb`/`sb`, byte-level loops | `strlen` + `str_reverse` subroutines applied to `"hello"` |
-| [`selection_sort.s`](examples/asm/selection_sort.s) | Nested loops, `lw`/`sw`, index arithmetic | Selection sort on `{64,25,12,22,11}` → `11 12 22 25 64` |
-| [`constants.s`](examples/asm/constants.s) | `.equ` / `.set` symbolic constants | Defines `SIZE=8` and `FIRST=1`; sums 1..=8 = 36 |
+| [`gcd.s`](examples/32bit/gcd.s) | RV32M — `rem` | Euclidean GCD algorithm: `gcd(48, 18) = 6` |
+| [`integer_power.s`](examples/32bit/integer_power.s) | RV32M — `mul`, `mulh`, `mulhu` | Exponentiation by squaring; `mulhu` overflow detection |
+| [`quadratic.s`](examples/32bit/quadratic.s) | RV32F — `flw`, `fmul.s`, `fsub.s`, `fsqrt.s`, `fdiv.s`, `fneg.s`, `flt.s`, `fcvt.s.w` | Quadratic formula solver: roots of x²−5x+6=0 |
+| [`dot_product.s`](examples/32bit/dot_product.s) | RV32F — `fmadd.s`, `flw` | Dot product using fused multiply-add (FMA) |
+| [`newton_sqrt.s`](examples/32bit/newton_sqrt.s) | RV32D — `fld`, `fadd.d`, `fmul.d`, `fdiv.d`, `fabs.d`, `fsqrt.d` | Newton-Raphson sqrt(2) compared to hardware `fsqrt.d` |
+| [`csr_benchmark.s`](examples/32bit/csr_benchmark.s) | Zicsr — `csrr instret`; RV32M — `mul` | Instruction-count benchmarking: loop vs. Gauss formula |
+| [`stack_frame.s`](examples/32bit/stack_frame.s) | ABI — `call`/`ret`, callee-saved regs, stack frame | `sum_of_squares(5) = 55` via a fully ABI-compliant subroutine |
+| [`factorial.s`](examples/32bit/factorial.s) | ABI — recursive calls, `sw`/`lw` on stack | Recursive `10! = 3628800`; demonstrates saving `ra` and `a0` across calls |
+| [`heap_alloc.s`](examples/32bit/heap_alloc.s) | Syscall 9 — `sbrk` | Dynamic heap allocation: fill and print an 8-element array |
+| [`linked_list.s`](examples/32bit/linked_list.s) | Syscall 9 — `sbrk`, `lb`/`sb`, pointer chasing | Singly linked list: allocate nodes, link them, traverse and print |
+| [`string_ops.s`](examples/32bit/string_ops.s) | `lb`/`sb`, byte-level loops | `strlen` + `str_reverse` subroutines applied to `"hello"` |
+| [`selection_sort.s`](examples/32bit/selection_sort.s) | Nested loops, `lw`/`sw`, index arithmetic | Selection sort on `{64,25,12,22,11}` → `11 12 22 25 64` |
+| [`constants.s`](examples/32bit/constants.s) | `.equ` / `.set` symbolic constants | Defines `SIZE=8` and `FIRST=1`; sums 1..=8 = 36 |
 
 Open any file in OARS, click **Assemble**, then **Run** to see the output in the Console panel.
 

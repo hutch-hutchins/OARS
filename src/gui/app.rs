@@ -842,7 +842,8 @@ impl Tab {
                 let entry = ac.candidates[ac.selected].clone();
                 let word_start = ac.word_start;
                 let word_end = ac.word_end.min(self.source.len());
-                self.source.replace_range(word_start..word_end, &entry.insert);
+                self.source
+                    .replace_range(word_start..word_end, &entry.insert);
 
                 // Compute absolute char positions for every placeholder in the template.
                 // Templates are ASCII so byte offset == char offset within the template.
@@ -964,17 +965,16 @@ impl Tab {
                                 if let Some((path_start, partial)) =
                                     include_path_context(source, byte_idx)
                                 {
-                                    let base_dir = self.file_path
+                                    let base_dir = self
+                                        .file_path
                                         .as_deref()
                                         .and_then(|p| p.parent())
                                         .unwrap_or(std::path::Path::new("."));
                                     let cands = complete_include_paths(&partial, base_dir);
                                     (path_start, byte_idx, cands)
                                 } else {
-                                    let prefix =
-                                        word_before_cursor(source, byte_idx).to_owned();
-                                    let cands =
-                                        compute_completions(&prefix, source, byte_idx);
+                                    let prefix = word_before_cursor(source, byte_idx).to_owned();
+                                    let cands = compute_completions(&prefix, source, byte_idx);
                                     (byte_idx.saturating_sub(prefix.len()), byte_idx, cands)
                                 };
 
@@ -1460,10 +1460,8 @@ impl Tab {
                             }
                         }
                         if hot {
-                            let (rect, _) = ui.allocate_exact_size(
-                                egui::vec2(14.0, 18.0),
-                                egui::Sense::hover(),
-                            );
+                            let (rect, _) = ui
+                                .allocate_exact_size(egui::vec2(14.0, 18.0), egui::Sense::hover());
                             let my = rect.center().y;
                             let x0 = rect.left() + 1.0;
                             let x1 = rect.right() - 1.0;
@@ -1560,10 +1558,18 @@ impl Tab {
             .column(Column::remainder().clip(true).at_least(160.0))
             .header(18.0, |mut h| {
                 h.col(|_| {});
-                h.col(|ui| { ui.strong("Address"); });
-                h.col(|ui| { ui.strong("Machine Code"); });
-                h.col(|ui| { ui.strong("Decoded"); });
-                h.col(|ui| { ui.strong("Source"); });
+                h.col(|ui| {
+                    ui.strong("Address");
+                });
+                h.col(|ui| {
+                    ui.strong("Machine Code");
+                });
+                h.col(|ui| {
+                    ui.strong("Decoded");
+                });
+                h.col(|ui| {
+                    ui.strong("Source");
+                });
             })
             .body(|body| {
                 body.rows(18.0, rows.len(), |mut row| {
@@ -1581,10 +1587,8 @@ impl Tab {
                     // PC arrow column
                     row.col(|ui| {
                         if hot {
-                            let (rect, _) = ui.allocate_exact_size(
-                                egui::vec2(14.0, 18.0),
-                                egui::Sense::hover(),
-                            );
+                            let (rect, _) = ui
+                                .allocate_exact_size(egui::vec2(14.0, 18.0), egui::Sense::hover());
                             let my = rect.center().y;
                             let x0 = rect.left() + 1.0;
                             let x1 = rect.right() - 1.0;
@@ -1607,7 +1611,9 @@ impl Tab {
                         } else {
                             t
                         });
-                        if hot { resp.scroll_to_me(None); }
+                        if hot {
+                            resp.scroll_to_me(None);
+                        }
                     });
 
                     row.col(|ui| {
@@ -1659,15 +1665,22 @@ impl Tab {
             ui.separator();
             if let Some((desc, example)) = describe(mnem) {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(mnem).monospace().strong()
-                        .color(egui::Color32::from_rgb(100, 200, 255)));
+                    ui.label(
+                        RichText::new(mnem)
+                            .monospace()
+                            .strong()
+                            .color(egui::Color32::from_rgb(100, 200, 255)),
+                    );
                     ui.separator();
                     ui.label(desc);
                 });
                 ui.horizontal(|ui| {
                     ui.weak("Example:");
-                    ui.label(RichText::new(example).monospace()
-                        .color(egui::Color32::from_rgb(160, 220, 160)));
+                    ui.label(
+                        RichText::new(example)
+                            .monospace()
+                            .color(egui::Color32::from_rgb(160, 220, 160)),
+                    );
                 });
             } else {
                 ui.label(format!("{mnem} — no reference entry"));
@@ -2971,7 +2984,7 @@ fn compute_completions(prefix: &str, source: &str, cursor_byte: usize) -> Vec<Ac
                 .map(|&n| AcEntry {
                     display: n.to_owned(),
                     insert: n.to_owned(),
-                    })
+                })
                 .collect();
         }
         let mut seen: HashSet<String> = HashSet::new();
@@ -2981,7 +2994,7 @@ fn compute_completions(prefix: &str, source: &str, cursor_byte: usize) -> Vec<Ac
                 entries.push(AcEntry {
                     display: name.to_string(),
                     insert: name.to_string(),
-                    });
+                });
             }
         }
         for name in crate::hardware::fp_registers::FP_REG_NAMES {
@@ -2989,7 +3002,7 @@ fn compute_completions(prefix: &str, source: &str, cursor_byte: usize) -> Vec<Ac
                 entries.push(AcEntry {
                     display: name.to_string(),
                     insert: name.to_string(),
-                    });
+                });
             }
         }
         for line in source.lines() {
@@ -3003,7 +3016,7 @@ fn compute_completions(prefix: &str, source: &str, cursor_byte: usize) -> Vec<Ac
                     entries.push(AcEntry {
                         display: label.to_owned(),
                         insert: label.to_owned(),
-                            });
+                    });
                 }
             }
         }
@@ -3732,12 +3745,23 @@ impl eframe::App for OarsApp {
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         let session = SessionData {
             active: self.active,
-            tabs: self.tabs.iter().map(|t| TabSession {
-                file_path: t.file_path.as_ref().map(|p| p.to_string_lossy().into_owned()),
-                source: if t.file_path.is_none() { Some(t.source.clone()) } else { None },
-                xlen: t.xlen,
-                breakpoints: t.breakpoints.iter().map(|(&a, c)| (a, c.clone())).collect(),
-            }).collect(),
+            tabs: self
+                .tabs
+                .iter()
+                .map(|t| TabSession {
+                    file_path: t
+                        .file_path
+                        .as_ref()
+                        .map(|p| p.to_string_lossy().into_owned()),
+                    source: if t.file_path.is_none() {
+                        Some(t.source.clone())
+                    } else {
+                        None
+                    },
+                    xlen: t.xlen,
+                    breakpoints: t.breakpoints.iter().map(|(&a, c)| (a, c.clone())).collect(),
+                })
+                .collect(),
             watches: self.watches.clone(),
             dark_mode: self.dark_mode,
         };

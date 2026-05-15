@@ -34,8 +34,8 @@ fn resolve_inner(
                 let src = std::fs::read_to_string(&abs)
                     .map_err(|e| anyhow::anyhow!("cannot read {}: {}", abs.display(), e))?;
 
-                let included = parser::parse(&src)
-                    .map_err(|e| anyhow::anyhow!("{}: {}", abs.display(), e))?;
+                let included =
+                    parser::parse(&src).map_err(|e| anyhow::anyhow!("{}: {}", abs.display(), e))?;
 
                 let child_dir = abs.parent().unwrap_or(Path::new("."));
                 let resolved = resolve_inner(included, child_dir, stack)?;
