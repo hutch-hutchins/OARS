@@ -59,16 +59,18 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          Compress-Archive `
-            -Path "target/${{ matrix.target }}/release/${{ matrix.binary }}" `
-            -DestinationPath "${{ matrix.archive }}"
+          New-Item -ItemType Directory -Force -Path staging | Out-Null
+          Copy-Item "target\${{ matrix.target }}\release\${{ matrix.binary }}" staging\
+          Copy-Item -Recurse examples\asm staging\examples
+          Compress-Archive -Path staging\* -DestinationPath "${{ matrix.archive }}"
 
       - name: Package (Unix)
         if: runner.os != 'Windows'
         run: |
-          tar czf "${{ matrix.archive }}" \
-            -C "target/${{ matrix.target }}/release" \
-            "${{ matrix.binary }}"
+          mkdir staging
+          cp "target/${{ matrix.target }}/release/${{ matrix.binary }}" staging/
+          cp -r examples/asm staging/examples
+          tar czf "${{ matrix.archive }}" -C staging .
 
       # Each build job creates/updates the release directly so there is no
       # separate release job that can get stuck waiting on slow runners.
