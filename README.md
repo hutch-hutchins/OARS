@@ -192,53 +192,82 @@ The binary will be at `target/release/oars` (or `oars.exe` on Windows).
 
 ## Roadmap
 
-### v0.6.0 — Current Release ✓
+### v0.7.0 — Current Release ✓
 
-#### Assembler
+#### v0.7.0 — RV64I Engine
+
+- [x] **RV64I 64-bit mode** — selectable per-tab (32-bit default); separate `CpuState64` / `engine64` with full 64-bit registers, 64-bit ALU, and 64-bit memory operations
+- [x] **RV64I instruction support** — `ld`, `sd`, `lwu`; `addiw`, `slliw`, `srliw`, `sraiw`; `addw`, `subw`, `sllw`, `srlw`, `sraw`; `mulhu` with 128-bit product; 6-bit shamt for `slli`/`srli`/`srai`
+- [x] **`.dword` / `.quad` directive** — emit 64-bit values in `.data` sections
+- [x] **64-bit register display** — integer registers shown as `0x00000000 00000000` with a space at the 32/64-bit boundary for easy reading
+
+#### v0.7.0 — Assembler
+
+- [x] **`.include` directive** — pull in any `.s` file with `.include "path"`; paths are resolved relative to the including file so libraries can live alongside the main program; circular includes are detected and reported; works in both CLI and GUI modes
+
+#### v0.7.0 — GUI
+
+- [x] **Disassembler view** — new "Disassembler" tab in the main panel; shows every assembled instruction as address | machine word | decoded mnemonic | original source line; the current PC row is highlighted yellow and scrolled into view; covers RV32I, RV32M, RV32F, RV32D, Zicsr, RV64I, and common pseudo-instructions (`nop`, `ret`, `mv`, `li`, `not`, `neg`, `j`, `beqz`, etc.)
+- [x] **Instruction reference in disassembler** — click any decoded instruction row to see an inline description and example at the bottom of the Disassembler panel; click the same row again to dismiss; covers ~80 instructions including all pseudos, RV32IMFD, Zicsr, and RV64I
+- [x] **Autocomplete tab-stop navigation** — after inserting an instruction template (e.g. `add rd, rs1, rs2`), the first operand placeholder is selected automatically; each subsequent **Tab** press advances to the next placeholder so all operands can be filled in without touching the mouse
+- [x] **PC indicator arrow** — replaced the Unicode `→` character (missing from egui's bundled font, rendered as a yellow box) with a painted filled triangle; always renders correctly regardless of font
+- [x] **`.include` path autocomplete** — while typing a path inside `.include "…"`, the editor shows completions for `.s` / `.asm` files and sub-directories in the current file's directory; triggered automatically on each keystroke or with **Ctrl+Space**
+- [x] **Session save / restore** — OARS remembers open files, source content (for unsaved buffers), per-tab mode (RV32/RV64), breakpoints, watch pins, and theme across application restarts; no manual export needed
+
+#### v0.7.0 — Examples & Tests
+
+- [x] **Examples reorganised** — `examples/asm/` split into `examples/32bit/` (17 RV32 programs), `examples/64bit/` (10 RV64 programs), and `examples/includes/` (multi-file library demos)
+- [x] **10 RV64 examples** — programs that genuinely require 64-bit arithmetic: `gauss_sum64.s` (5 billion sum), `sum_cubes64.s` (250 billion sum), `fibonacci_big64.s` (F(50) > 2^32), `mulhi64.s` (MULHU / 128-bit overflow), `count_bits64.s` (popcount via Kernighan), `word_ops64.s` (W-suffix overflow demo), `big_mul64.s`, `array64.s`, `fibonacci64.s`, `hello64.s`
+- [x] **Multi-file examples** — `demo_math.s` and `demo_strings.s` each `.include` a shared library (`math_lib.s`, `string_lib.s`)
+- [x] Integration test suite grown to 29 tests, all passing
+
+### v0.6.0 ✓
+
+#### v0.6.0 — Assembler
 
 - [x] **`.equ` / `.set` symbolic constants** — define named integer constants with `.equ NAME, VALUE` anywhere in the file; use the name as an immediate operand in any instruction (`li a0, SIZE`, `addi t0, t0, STRIDE`, loop bounds, etc.)
 
-#### Debugger & GUI
+#### v0.6.0 — Debugger & GUI
 
 - [x] **Call Stack panel** — new bottom-panel tab shows the live call chain (callee → … → main) updated on every `jal`/`jalr ra` call and `ret`; gives instant visibility into recursion depth and call order
 - [x] **Conditional breakpoints** — breakpoints can carry an optional condition expression (`REG OP VALUE`, e.g. `t0 >= 5`, `a0 == 0`); execution only pauses when the expression is true at that PC; managed in the **Breakpoints** bottom-panel tab
 - [x] **Editor autocomplete** — context-aware popup while typing: at the start of a line shows full instruction syntax templates (e.g. `li rd, imm`, `sw rs2, off(rs1)`); in operand position shows register names and source labels; selecting a template inserts it and selects the first operand placeholder so you can overtype immediately; scrollable list with wrap-around navigation; **Tab** or **Enter** to accept, arrow keys to navigate, **Escape** to dismiss; **Tab** no longer cycles app focus when the editor is active
 
-#### v0.6.0 Examples & Tests
+#### v0.6.0 — Examples & Tests
 
 - [x] New example: `constants.s` — `.equ` demo; sums 1..=8 = 36
 - [x] Integration test suite grown to 17 tests, all passing
 
 ### v0.5.0 ✓
 
-#### Debugger
+#### v0.5.0 — Debugger
 
 - [x] **Step Over** — executes through a `call` and pauses at the instruction after it; otherwise behaves like Step
 - [x] **Step Out** — runs until the current function returns (watches saved `ra`), then pauses
 - [x] **Memory watchpoints** — set a write-watchpoint on any byte address; execution pauses immediately after any instruction that writes to a watched address; managed in a dedicated **Watchpoints** bottom-panel tab
 
-#### Examples & Tests
+#### v0.5.0 — Examples & Tests
 
 - [x] 3 new examples: `linked_list.s` (heap-allocated linked list), `string_ops.s` (`strlen` + `str_reverse`), `selection_sort.s`
 - [x] Integration test suite grown to 16 tests, all passing
 
 ### v0.4.0 ✓
 
-#### Export & Assembler
+#### v0.4.0 — Export & Assembler
 
 - [x] `File → Export Flat Binary…` — saves raw text-segment bytes (load at `TEXT_BASE`)
 - [x] `File → Export ELF…` — minimal ELF32 RISC-V executable with PT_LOAD segments (text r-x, data rw-)
 - [x] `.asciz` directive recognised (alias for `.asciiz` / `.string`)
 - [x] `ret` / `jr` pseudo-op fix: now correctly emits `jalr rd, 0(rs1)`
 
-#### v0.4.0 Examples & Tests
+#### v0.4.0 — Examples & Tests
 
 - [x] 3 ABI examples: `stack_frame.s`, `factorial.s`, `heap_alloc.s`
 - [x] Integration test suite grown to 13 tests, all passing
 
-### v0.3.0 — Prior Release ✓
+### v0.3.0 ✓
 
-#### ISA & Core
+#### v0.3.0 — ISA & Core
 
 - [x] RV32I base integer ISA
 - [x] RV32M multiply / divide (`mul`, `mulh`, `mulhu`, `mulhsu`, `div`, `divu`, `rem`, `remu`)
@@ -249,7 +278,7 @@ The binary will be at `target/release/oars` (or `oars.exe` on Windows).
 - [x] Syscalls 1–12, 34, 35, 36, 93 (print/read integer, float, double, string, char; hex, binary, unsigned; exit with code)
 - [x] CLI runner (`--dump-registers`, `--dump-fp-registers`, `--max-steps`, `--start-at-main`, `--telemetry`)
 
-#### GUI & Debugger
+#### v0.3.0 — GUI & Debugger
 
 - [x] egui / eframe native GUI — single double-clickable binary, no installer
 - [x] Editor tab with line numbers and RISC-V syntax highlighting
@@ -272,43 +301,14 @@ The binary will be at `target/release/oars` (or `oars.exe` on Windows).
 - [x] File open / save dialog (`.s` / `.asm` filter)
 - [x] GitHub Actions release builds (Windows x86-64, macOS ARM, Linux x86-64)
 
-#### v0.3.0 Examples & Tests
+#### v0.3.0 — Examples & Tests
 
 - [x] 11 ready-to-run example programs in `examples/asm/` covering RV32M, RV32F, RV32D, Zicsr, and interactive console I/O
 - [x] Integration test suite — 10 tests, all passing
 
-### v0.7.0 — In Development
-
-#### RV64I Engine
-
-- [x] **RV64I 64-bit mode** — selectable per-tab (32-bit default); separate `CpuState64` / `engine64` with full 64-bit registers, 64-bit ALU, and 64-bit memory operations
-- [x] **RV64I instruction support** — `ld`, `sd`, `lwu`; `addiw`, `slliw`, `srliw`, `sraiw`; `addw`, `subw`, `sllw`, `srlw`, `sraw`; `mulhu` with 128-bit product; 6-bit shamt for `slli`/`srli`/`srai`
-- [x] **`.dword` / `.quad` directive** — emit 64-bit values in `.data` sections
-- [x] **64-bit register display** — integer registers shown as `0x00000000 00000000` with a space at the 32/64-bit boundary for easy reading
-
-#### v0.7.0 Assembler
-
-- [x] **`.include` directive** — pull in any `.s` file with `.include "path"`; paths are resolved relative to the including file so libraries can live alongside the main program; circular includes are detected and reported; works in both CLI and GUI modes
-
-#### GUI
-
-- [x] **Disassembler view** — new "Disassembler" tab in the main panel; shows every assembled instruction as address | machine word | decoded mnemonic | original source line; the current PC row is highlighted yellow and scrolled into view; covers RV32I, RV32M, RV32F, RV32D, Zicsr, RV64I, and common pseudo-instructions (`nop`, `ret`, `mv`, `li`, `not`, `neg`, `j`, `beqz`, etc.)
-- [x] **Instruction reference in disassembler** — click any decoded instruction row to see an inline description and example at the bottom of the Disassembler panel; click the same row again to dismiss; covers ~80 instructions including all pseudos, RV32IMFD, Zicsr, and RV64I
-- [x] **Autocomplete tab-stop navigation** — after inserting an instruction template (e.g. `add rd, rs1, rs2`), the first operand placeholder is selected automatically; each subsequent **Tab** press advances to the next placeholder so all operands can be filled in without touching the mouse
-- [x] **PC indicator arrow** — replaced the Unicode `→` character (missing from egui's bundled font, rendered as a yellow box) with a painted filled triangle; always renders correctly regardless of font
-- [x] **`.include` path autocomplete** — while typing a path inside `.include "…"`, the editor shows completions for `.s` / `.asm` files and sub-directories in the current file's directory; triggered automatically on each keystroke or with **Ctrl+Space**
-- [x] **Session save / restore** — OARS remembers open files, source content (for unsaved buffers), per-tab mode (RV32/RV64), breakpoints, watch pins, and theme across application restarts; no manual export needed
-
-#### v0.7.0 Examples & Tests
-
-- [x] **Examples reorganised** — `examples/asm/` split into `examples/32bit/` (17 RV32 programs) and `examples/64bit/` (10 RV64 programs)
-- [x] **10 RV64 examples** — programs that genuinely require 64-bit arithmetic: `gauss_sum64.s` (5 billion sum), `sum_cubes64.s` (250 billion sum), `fibonacci_big64.s` (F(50) > 2^32), `mulhi64.s` (MULHU / 128-bit overflow), `count_bits64.s` (popcount via Kernighan), `word_ops64.s` (W-suffix overflow demo), `big_mul64.s`, `array64.s`, `fibonacci64.s`, `hello64.s`
-- [x] **Release archives include examples** — GitHub Actions packages `examples/32bit/` and `examples/64bit/` alongside the binary
-- [x] Integration test suite grown to 27 tests (17 RV32 + 10 RV64), all passing
-
 ### Future
 
-No items pending — all planned v0.7.0 features are complete.
+No items pending.
 
 ## License
 
